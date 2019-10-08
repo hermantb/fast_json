@@ -17,6 +17,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+#include <locale.h>
 #include <errno.h>
 #include "fast_json.h"
 #if USE_FAST_CONVERT
@@ -83,6 +84,7 @@ typedef struct fast_json_big_struct
 struct fast_json_struct
 {
   const char *json_str;
+  char decimal_point;
   FAST_JSON_ERROR_ENUM error;
   unsigned int options;
   fast_json_malloc_type my_malloc;
@@ -1023,6 +1025,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	return NULL;
       }
       if (c == '.') {
+	json->save[json->n_save - 1] = json->decimal_point;
 	c = fast_json_getc_save (json);
 	integer = 0;
 	if (hex) {
@@ -1275,6 +1278,7 @@ fast_json_create (fast_json_malloc_type malloc_fn,
     json->my_malloc = malloc_fn ? malloc_fn : malloc;
     json->my_realloc = malloc_fn ? realloc_fn : realloc;
     json->my_free = free_fn ? free_fn : free;
+    json->decimal_point = *localeconv()->decimal_point;
   }
   return json;
 }
@@ -1416,6 +1420,7 @@ fast_json_parse_all (FAST_JSON_TYPE json)
   json->column = 0;
   json->position = 0;
   json->last_char = 0;
+  json->decimal_point = *localeconv()->decimal_point;
   if (fast_json_skip_whitespace (json, &c) == FAST_JSON_OK) {
     if (c != FAST_JSON_EOF) {
       v = fast_json_parse_value (json, c);
@@ -1755,7 +1760,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       unsigned int sign = 0;
       const char *save;
       char *end;
-      double n;
+      const char *dp = NULL;
 
       save = value;
       if (*value == '+') {
@@ -1825,7 +1830,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	return NULL;
       }
       if (*value == '.') {
-	value++;
+	dp = value++;
 	integer = 0;
 	if (hex) {
 	  if (fast_json_isxdigit (*value)) {
@@ -1887,17 +1892,53 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	  break;
 	}
       }
-      errno = 0;
+      {
+        double n;
+
+	if (dp && json->decimal_point != '.') {
+          char e;
+	  char b[100];
+	  char *s = &b[0];
+
+	  if ((value - save) >= sizeof (b)) {
+	    s = (char *) (*json->my_malloc) ((value - save) + 1);
+	    if (s == NULL) {
+	      fast_json_store_error2 (json, FAST_JSON_MALLOC_ERROR, save, ":,]}");
+	      return NULL;
+	    }
+	  }
+	  memcpy (s, save, value - save);
+	  s[value - save] = '\0';
+	  s[dp - save] = json->decimal_point;
+          errno = 0;
 #if USE_FAST_CONVERT
-      n = fast_strtod (save, &end);
+          n = fast_strtod (s, &end);
 #else
-      n = strtod (save, &end);
+          n = strtod (s, &end);
 #endif
-      if (end != value || errno == ERANGE) {
-	fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save, ":,]}");
-	return NULL;
+	  e = *end;
+	  if (s != &b[0]) {
+	    (*json->my_free) (s);
+	  }
+          if (e != '\0' || errno == ERANGE) {
+	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save, ":,]}");
+	    return NULL;
+          }
+	}
+	else {
+          errno = 0;
+#if USE_FAST_CONVERT
+          n = fast_strtod (save, &end);
+#else
+          n = strtod (save, &end);
+#endif
+          if (end != value || errno == ERANGE) {
+	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save, ":,]}");
+	    return NULL;
+          }
+	}
+        v = fast_json_create_double_value (json, n);
       }
-      v = fast_json_create_double_value (json, n);
     }
     break;
   case '[':
@@ -2092,6 +2133,7 @@ fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
   json->line = 1;
   json->column = 0;
   json->position = 0;
+  json->decimal_point = *localeconv()->decimal_point;
   if (fast_json_skip_whitespace2 (json, &json_str) == FAST_JSON_OK) {
     if (*json_str != '\0') {
       v = fast_json_parse_value2 (json, &json_str);
@@ -2743,7 +2785,10 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
 	while (fast_json_isdigit (*cp)) {
 	  cp++;
 	}
-	if (*cp == '\0') {
+	if (*cp == json->decimal_point) {
+	  *cp = '.';
+	}
+	else if (*cp == '\0') {
 	  strcpy (cp, ".0");
 	}
 	return fast_json_puts (json, v, strlen (v));
@@ -2776,6 +2821,7 @@ fast_json_print_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->u.buf.len = 0;
     json->u.buf.max = 0;
     json->u.buf.txt = NULL;
+    json->decimal_point = *localeconv()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       (*json->my_free) (json->u.buf.txt);
       return NULL;
@@ -2799,6 +2845,7 @@ fast_json_print_string_len (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->u.buf.len = 0;
     json->u.buf.max = len;
     json->u.buf.txt = str;
+    json->decimal_point = *localeconv()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
     }
@@ -2818,6 +2865,7 @@ fast_json_print_file (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->puts = fast_json_puts_file;
     json->puts_len = 0;
     json->u.fp = fp;
+    json->decimal_point = *localeconv()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
     }
@@ -2842,6 +2890,7 @@ fast_json_print_file_name (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
       json->puts = fast_json_puts_file;
       json->puts_len = 0;
       json->u.fp = fp;
+      json->decimal_point = *localeconv()->decimal_point;
       retval = fast_json_print_buffer (json, value, 0, nice);
       if (retval == 0) {
 	retval = fast_json_last_puts (json, "\n", nice ? 1 : 0);
@@ -2860,6 +2909,7 @@ fast_json_print_fd (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->puts = fast_json_puts_fd;
     json->puts_len = 0;
     json->u.fd.fd = fd;
+    json->decimal_point = *localeconv()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
     }

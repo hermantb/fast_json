@@ -118,10 +118,10 @@ main (int argc, char **argv)
 
   for (i = 1; i < argc; i++) {
     if (strncmp (argv[i], "--count=", strlen ("--count=")) == 0) {
-      count = strtoul (&argv[1][strlen ("--count=")], NULL, 0);
+      count = strtoul (&argv[i][strlen ("--count=")], NULL, 0);
     }
     else if (strncmp (argv[i], "--reuse=", strlen ("--reuse=")) == 0) {
-      reuse = strtoul (&argv[1][strlen ("--reuse=")], NULL, 0);
+      reuse = strtoul (&argv[i][strlen ("--reuse=")], NULL, 0);
     }
     else if (strcmp (argv[i], "--print_time") == 0) {
       print_time = 1;

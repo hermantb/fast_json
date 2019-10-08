@@ -14,6 +14,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <locale.h>
+#if USE_FAST_CONVERT
+#include "fast_convert/fast_convert.h"
+#endif
 #include "fast_json.h"
 
 #define	TEST1_FILE	"test1.json"
@@ -181,6 +185,7 @@ main (void)
 {
   unsigned int i;
   unsigned int j;
+  double dval;
   char *cp;
   char *np;
   FILE *fp;
@@ -1572,7 +1577,7 @@ main (void)
   str[5] = '"';
   str[6] = ']';
   str[7] = '\0';
-  n = fast_json_parse_string (json, str);
+  fast_json_parse_string (json, str);
   if (fast_json_parser_error (json) != FAST_JSON_UNICODE_ERROR) {
     fprintf (stderr, "utf8 error expected: %s\n",
 	     fast_json_error_str (fast_json_parser_error (json)));
@@ -1617,6 +1622,39 @@ main (void)
   if (n == NULL) {
     fprintf (stderr, "Large object nesting not worked. %s\n",
 	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+  fast_json_value_free (json, n);
+
+  setlocale (LC_ALL, "nl_NL.UTF-8");
+  localeconv(); /* will normally be called in parser */
+#if USE_FAST_CONVERT
+  fast_dtoa (12.34, PREC_DBL_NR, str);
+#else
+  snprintf (str, sizeof(str), "%g", 12.34);
+#endif
+  if (strchr (str, ',') == NULL) {
+    fprintf (stderr, "Locale does not work '%s'\n", str);
+    exit (1);
+  }
+#if USE_FAST_CONVERT
+  dval = fast_strtod (str, NULL);
+#else
+  dval = strtod (str, NULL);
+#endif
+  if (dval != 12.34) {
+    fprintf (stderr, "Locale does not work '%g'\n", dval);
+    exit (1);
+  }
+  n = fast_json_parse_string (json, "12.34");
+  if (n == NULL) {
+    fprintf (stderr, "Locale1 does not work\n");
+    exit (1);
+  }
+  fast_json_value_free (json, n);
+  n = fast_json_parse_string2 (json, "12.34");
+  if (n == NULL) {
+    fprintf (stderr, "Locale2 does not work");
     exit (1);
   }
   fast_json_value_free (json, n);

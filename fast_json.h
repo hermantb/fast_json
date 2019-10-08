@@ -126,21 +126,27 @@ extern "C"
 /** Define fast json int_type */
   typedef uint64_t fast_json_int_64;
 
-/** define fast json print */
+/** define fast json print integer format */
 #define	FAST_JSON_FMT_INT	PRId64
 
 /** Do not check for loops */
 #define	FAST_JSON_NO_CHECK_LOOP		(0x01)
+
 /** During parsing convert all number to doubles */
 #define	FAST_JSON_PARSE_INT_AS_DOUBLE	(0x02)
+
 /** Allow (+)/(-)inf(inity) and (+)/(-)nan([a-z][0-9]_) and (+)number */
 #define	FAST_JSON_INF_NAN		(0x04)
+
 /** Allow octal and hex integer numbers and hex floating point numbers */
 #define	FAST_JSON_ALLOW_OCT_HEX		(0x08)
+
 /** Sort object names when printing */
 #define	FAST_JSON_SORT_OBJECTS		(0x10)
+
 /** Do not check for eof (allows multiple data) */
 #define	FAST_JSON_NO_EOF_CHECK		(0x20)
+
 /** Use bigger allocs for objects */
 #define	FAST_JSON_BIG_ALLOC		(0x40)
 
@@ -200,6 +206,7 @@ extern "C"
   extern FAST_JSON_TYPE fast_json_create (fast_json_malloc_type malloc_fn,
 					  fast_json_realloc_type realloc_fn,
 					  fast_json_free_type free_fn);
+
 /**
  * \b Description
  * 
@@ -240,6 +247,7 @@ extern "C"
  */
   extern FAST_JSON_ERROR_ENUM fast_json_options (FAST_JSON_TYPE json,
 						 unsigned int value);
+
 /**
  * \b Description
  *
@@ -325,6 +333,7 @@ extern "C"
   extern FAST_JSON_DATA_TYPE fast_json_parse_string_len (FAST_JSON_TYPE json,
 							 const char *json_str,
 							 size_t len);
+
 /**
  * \b Description
  *
@@ -336,6 +345,7 @@ extern "C"
  */
   extern FAST_JSON_DATA_TYPE fast_json_parse_file (FAST_JSON_TYPE json,
 						   FILE * fp);
+
 /**
  * \b Description
  *
@@ -347,6 +357,7 @@ extern "C"
  */
   extern FAST_JSON_DATA_TYPE fast_json_parse_file_name (FAST_JSON_TYPE json,
 							const char *name);
+
 /**
  * \b Description
  *
@@ -369,6 +380,7 @@ extern "C"
  */
   extern FAST_JSON_DATA_TYPE fast_json_parse_string2 (FAST_JSON_TYPE json,
 						      const char *json_str);
+
 /**
  * \b Description
  *
@@ -380,6 +392,7 @@ extern "C"
  */
   extern int fast_json_value_equal (FAST_JSON_DATA_TYPE value1,
 				    FAST_JSON_DATA_TYPE value2);
+
 /**
  * \b Description
  *
@@ -387,10 +400,11 @@ extern "C"
  *
  * \param json Json object from \ref fast_json_create.
  * \param value Json data to copy from.
- * \return Copied data.
+ * \return Copied data or NULL in case of error.
  */
   extern FAST_JSON_DATA_TYPE fast_json_value_copy (FAST_JSON_TYPE json,
 						   FAST_JSON_DATA_TYPE value);
+
 /**
  * \b Description
  *
@@ -415,6 +429,7 @@ extern "C"
   extern char *fast_json_print_string (FAST_JSON_TYPE json,
 				       FAST_JSON_DATA_TYPE value,
 				       unsigned int nice);
+
 /**
  * \b Description
  *
@@ -434,6 +449,7 @@ extern "C"
 					 FAST_JSON_DATA_TYPE value,
 					 char *str, size_t len,
 					 unsigned int nice);
+
 /**
  * \b Description
  *
@@ -448,6 +464,7 @@ extern "C"
   extern int fast_json_print_file (FAST_JSON_TYPE json,
 				   FAST_JSON_DATA_TYPE value,
 				   FILE * fp, unsigned int nice);
+
 /**
  * \b Description
  *
@@ -462,6 +479,7 @@ extern "C"
   extern int fast_json_print_file_name (FAST_JSON_TYPE json,
 					FAST_JSON_DATA_TYPE value,
 					const char *name, unsigned int nice);
+
 /**
  * \b Description
  *
@@ -476,6 +494,7 @@ extern "C"
   extern int fast_json_print_fd (FAST_JSON_TYPE json,
 				 FAST_JSON_DATA_TYPE value,
 				 int fd, unsigned int nice);
+
 /**
  * \b Description
  *
@@ -492,27 +511,30 @@ extern "C"
  * Create json null type.
  *
  * \param json Json object from \ref fast_json_create.
- * \return Json null type.
+ * \return Json null type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_null (FAST_JSON_TYPE json);
+
 /**
  * \b Description
  *
  * Create json true type.
  *
  * \param json Json object from \ref fast_json_create.
- * \return Json true type.
+ * \return Json true type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_true (FAST_JSON_TYPE json);
+
 /**
  * \b Description
  *
  * Create json false type.
  *
  * \param json Json object from \ref fast_json_create.
- * \return Json false type.
+ * \return Json false type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_false (FAST_JSON_TYPE json);
+
 /**
  * \b Description
  *
@@ -520,12 +542,13 @@ extern "C"
  *
  * \param json Json object from \ref fast_json_create.
  * \param value Input boolean value.
- * \return Json false/true type.
+ * \return Json false/true type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_boolean_value (FAST_JSON_TYPE
 							     json,
 							     unsigned int
 							     value);
+
 /**
  * \b Description
  *
@@ -533,12 +556,13 @@ extern "C"
  *
  * \param json Json object from \ref fast_json_create.
  * \param value Integer value.
- * \return Json integer type.
+ * \return Json integer type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_integer_value (FAST_JSON_TYPE
 							     json,
 							     fast_json_int_64
 							     value);
+
 /**
  * \b Description
  *
@@ -546,11 +570,12 @@ extern "C"
  *
  * \param json Json object from \ref fast_json_create.
  * \param value Double value
- * \return Json double type.
+ * \return Json double type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_double_value (FAST_JSON_TYPE
 							    json,
 							    double value);
+
 /**
  * \b Description
  *
@@ -558,26 +583,28 @@ extern "C"
  *
  * \param json Json object from \ref fast_json_create.
  * \param value String value.
- * \return Json string type.
+ * \return Json string type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_string (FAST_JSON_TYPE json,
 						      const char *value);
+
 /**
  * \b Description
  *
  * Create json array type.
  *
  * \param json Json object from \ref fast_json_create.
- * \return Json array type.
+ * \return Json array type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_array (FAST_JSON_TYPE json);
+
 /**
  * \b Description
  *
  * Create json object type.
  *
  * \param json Json object from \ref fast_json_create.
- * \return Json object type.
+ * \return Json object type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_object (FAST_JSON_TYPE json);
 
@@ -589,13 +616,14 @@ extern "C"
  * \param json Json object from \ref fast_json_create.
  * \param numbers Boolean array.
  * \param len Size of array.
- * \return Json boolean array type.
+ * \return Json boolean array type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_boolean_array (FAST_JSON_TYPE
 							     json,
 							     const unsigned
 							     int *numbers,
 							     size_t len);
+
 /**
  * \b Description
  *
@@ -604,7 +632,7 @@ extern "C"
  * \param json Json object from \ref fast_json_create.
  * \param numbers Integer array.
  * \param len Size of array.
- * \return Json integer array type.
+ * \return Json integer array type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_integer_array (FAST_JSON_TYPE
 							     json,
@@ -612,6 +640,7 @@ extern "C"
 							     fast_json_int_64
 							     * numbers,
 							     size_t len);
+
 /**
  * \b Description
  *
@@ -620,13 +649,14 @@ extern "C"
  * \param json Json object from \ref fast_json_create.
  * \param numbers Double array.
  * \param len Size of array.
- * \return Json double array type.
+ * \return Json double array type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_double_array (FAST_JSON_TYPE
 							    json,
 							    const double
 							    *numbers,
 							    size_t len);
+
 /**
  * \b Description
  *
@@ -635,7 +665,7 @@ extern "C"
  * \param json Json object from \ref fast_json_create.
  * \param strings String array.
  * \param len Size of array.
- * \return Json string array type.
+ * \return Json string array type or NULL of error occured.
  */
   extern FAST_JSON_DATA_TYPE fast_json_create_string_array (FAST_JSON_TYPE
 							    json,
@@ -656,6 +686,7 @@ extern "C"
   extern FAST_JSON_ERROR_ENUM fast_json_add_array (FAST_JSON_TYPE json,
 						   FAST_JSON_DATA_TYPE array,
 						   FAST_JSON_DATA_TYPE value);
+
 /**
  * \b Description
  *
@@ -707,6 +738,7 @@ extern "C"
 						      FAST_JSON_DATA_TYPE
 						      value,
 						      size_t index);
+
 /**
  * \b Description
  *
@@ -721,6 +753,7 @@ extern "C"
 						      FAST_JSON_DATA_TYPE
 						      array,
 						      size_t index);
+
 /**
  * \b Description
  *
@@ -738,6 +771,7 @@ extern "C"
 						      FAST_JSON_DATA_TYPE
 						      value,
 						      size_t index);
+
 /**
  * \b Description
  *
@@ -757,6 +791,7 @@ extern "C"
 						       FAST_JSON_DATA_TYPE
 						       value,
 						       size_t index);
+
 /**
  * \b Description
  *
@@ -781,6 +816,7 @@ extern "C"
  * \return Json type.
  */
   extern FAST_JSON_VALUE_TYPE fast_json_get_type (FAST_JSON_DATA_TYPE data);
+
 /**
  * \b Description
  *
@@ -790,6 +826,7 @@ extern "C"
  * \return Array size.
  */
   extern size_t fast_json_get_array_size (FAST_JSON_DATA_TYPE data);
+
 /**
  * \b Description
  *
@@ -802,6 +839,7 @@ extern "C"
   extern FAST_JSON_DATA_TYPE fast_json_get_array_data (FAST_JSON_DATA_TYPE
 						       data,
 						       size_t index);
+
 /**
  * \b Description
  *
@@ -811,6 +849,7 @@ extern "C"
  * \return Object size.
  */
   extern size_t fast_json_get_object_size (FAST_JSON_DATA_TYPE data);
+
 /**
  * \b Description
  *
@@ -856,6 +895,7 @@ extern "C"
  * \return Integer value.
  */
   extern fast_json_int_64 fast_json_get_integer (FAST_JSON_DATA_TYPE data);
+
 /**
  * \b Description
  *
@@ -865,6 +905,7 @@ extern "C"
  * \return Double value.
  */
   extern double fast_json_get_double (FAST_JSON_DATA_TYPE data);
+
 /**
  * \b Description
  *
@@ -874,6 +915,7 @@ extern "C"
  * \return String value.
  */
   extern char *fast_json_get_string (FAST_JSON_DATA_TYPE data);
+
 /**
  * \b Description
  *
@@ -908,6 +950,7 @@ extern "C"
   extern FAST_JSON_ERROR_ENUM fast_json_set_double (FAST_JSON_TYPE json,
 						    FAST_JSON_DATA_TYPE data,
 						    double value);
+
 /**
  * \b Description
  *
@@ -921,6 +964,7 @@ extern "C"
   extern FAST_JSON_ERROR_ENUM fast_json_set_string (FAST_JSON_TYPE json,
 						    FAST_JSON_DATA_TYPE data,
 						    const char *value);
+
 /**
  * \b Description
  *
@@ -934,6 +978,7 @@ extern "C"
 							   data,
 							   unsigned int
 							   value);
+
 /**
  * \b Description
  *
@@ -947,6 +992,7 @@ extern "C"
   extern FAST_JSON_ERROR_ENUM fast_json_calc_crc_string (FAST_JSON_TYPE json,
 							 const char *str,
 							 unsigned int *crc);
+
 /**
  * \b Description
  *
@@ -964,6 +1010,7 @@ extern "C"
 							     size_t len,
 							     unsigned int
 							     *crc);
+
 /**
  * \b Description
  *
@@ -977,6 +1024,7 @@ extern "C"
   extern FAST_JSON_ERROR_ENUM fast_json_calc_crc_file (FAST_JSON_TYPE json,
 						       FILE * fp,
 						       unsigned int *crc);
+
 /**
  * \b Description
  *
@@ -992,6 +1040,7 @@ extern "C"
 							    const char *name,
 							    unsigned int
 							    *crc);
+
 /**
  * \b Description
  *

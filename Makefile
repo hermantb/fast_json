@@ -34,10 +34,10 @@ libfast_jsonf.a: fast_json.h fast_json.c fast_convert/libfast_convert.a
 	rm fast_json.o
 
 fast_json_benchmarkf: fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a
-	${CC} ${OPTIONS} fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_benchmarkf
+	${CC} ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_benchmarkf
 
 fast_json_testf: fast_json_test.c libfast_jsonf.a fast_convert/libfast_convert.a
-	${CC} ${OPTIONS} fast_json_test.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_testf
+	${CC} ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT fast_json_test.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_testf
 
 fast_convert/libfast_convert.a: fast_convert
 	cd fast_convert; make
