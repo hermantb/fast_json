@@ -1,5 +1,6 @@
 OPTIONS = -g -O3 -Wall
 CC = gcc
+WIN_GCC = i686-w64-mingw32-gcc
 
 # -fsanitize=address,pointer-compare,pointer-subtract,leak,undefined
 # -fsanitize-address-use-after-scope
@@ -57,26 +58,44 @@ benchmark: fast_json_benchmark
 benchmarkf: fast_json_benchmarkf
 	./fast_json_benchmarkf
 
-large_bench: sf-city-lots-json fast_json_benchmark
-	./fast_json_benchmark --count=1 sf-city-lots-json/citylots.json
-	./fast_json_benchmark --count=1 --fast_string sf-city-lots-json/citylots.json 
-	./fast_json_benchmark --count=1 --big sf-city-lots-json/citylots.json
-	./fast_json_benchmark --count=1 --fast_string --big sf-city-lots-json/citylots.json
+large_bench: random.json fast_json_benchmark
+	./fast_json_benchmark --count=1 random.json
+	./fast_json_benchmark --count=1 --fast_string random.json
+	./fast_json_benchmark --count=1 --big random.json
+	./fast_json_benchmark --count=1 --fast_string --big random.json
 
-large_benchf: sf-city-lots-json fast_json_benchmarkf
-	./fast_json_benchmarkf --count=1 sf-city-lots-json/citylots.json
-	./fast_json_benchmarkf --count=1 --fast_string sf-city-lots-json/citylots.json 
-	./fast_json_benchmarkf --count=1 --big sf-city-lots-json/citylots.json
-	./fast_json_benchmarkf --count=1 --fast_string --big sf-city-lots-json/citylots.json
+large_benchf: random.json fast_json_benchmarkf
+	./fast_json_benchmarkf --count=1 random.json
+	./fast_json_benchmarkf --count=1 --fast_string random.json
+	./fast_json_benchmarkf --count=1 --big random.json
+	./fast_json_benchmarkf --count=1 --fast_string --big random.json
 
-sf-city-lots-json:
-	git clone https://github.com/zemirco/sf-city-lots-json.git
+random.json: fast_json_random
+	./fast_json_random > random.json
+
+fast_json_random: fast_json_random.c libfast_json.a
+	${CC} ${OPTIONS} fast_json_random.c libfast_json.a -o fast_json_random
+
+allwin: fast_json_test.exe fast_json_benchmark.exe fast_json_testf.exe fast_json_benchmarkf.exe
+
+fast_json_test.exe: fast_json.c fast_json_test.c
+	$(WIN_GCC) ${OPTIONS} -DWIN fast_json.c fast_json_test.c -o fast_json_test.exe
+
+fast_json_benchmark.exe: fast_json.c fast_json_benchmark.c
+	$(WIN_GCC) ${OPTIONS} -DWIN fast_json.c fast_json_benchmark.c -o fast_json_benchmark.exe
+
+fast_json_testf.exe: fast_json.c fast_json_test.c
+	$(WIN_GCC) ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT -DWIN fast_json.c fast_json_test.c fast_convert/fast_convert.c -o fast_json_testf.exe
+
+fast_json_benchmarkf.exe: fast_json.c fast_json_benchmark.c fast_convert
+	$(WIN_GCC) ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT -DWIN fast_json.c fast_json_benchmark.c fast_convert/fast_convert.c -o fast_json_benchmarkf.exe
 
 doc: fast_json.h README.md
 	doxygen
 
 clean:
-	rm -rf fast_json_benchmark fast_json_test fast_json_benchmarkf fast_json_testf libfast_json.a libfast_json.so libfast_jsonf.a doc
+	rm -rf fast_json_benchmark fast_json_test fast_json_benchmarkf fast_json_testf fast_json_random libfast_json.a libfast_json.so libfast_jsonf.a doc
+	rm -f fast_json_test.exe fast_json_benchmark.exe fast_json_testf.exe fast_json_benchmarkf.exe
 
 realclean: clean
-	rm -rf fast_convert sf-city-lots-json
+	rm -rf fast_convert random.json

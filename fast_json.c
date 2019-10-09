@@ -26,7 +26,9 @@
 
 #define	FAST_JSON_EOF		(-1)
 #define	FAST_JSON_INITIAL_SIZE	(4)
-#define	FAST_JSON_BIG_SIZE	(4096 / sizeof (struct fast_json_data_struct))
+#define	FAST_JSON_BUFFER_SIZE	(4096)
+#define	FAST_JSON_BIG_SIZE	(FAST_JSON_BUFFER_SIZE / \
+				 sizeof (struct fast_json_data_struct))
 
 #define SSORT(S_base,S_nel,S_width,S_comp)                              \
 {                                                                       \
@@ -104,7 +106,7 @@ struct fast_json_struct
     struct
     {
       int fd;
-      char buffer[4096];
+      char buffer[FAST_JSON_BUFFER_SIZE];
       size_t pos;
       size_t len;
     } fd;
@@ -117,7 +119,7 @@ struct fast_json_struct
   } u;
   int last_char;
   unsigned int puts_len;
-  char puts_buf[4096];
+  char puts_buf[FAST_JSON_BUFFER_SIZE];
   unsigned int n_save;
   unsigned int max_save;
   char *save;
@@ -225,6 +227,17 @@ static int fast_json_print_buffer (FAST_JSON_TYPE json,
 				   unsigned int n, unsigned int nice);
 static unsigned int fast_json_check_loop (FAST_JSON_DATA_TYPE data,
 					  FAST_JSON_DATA_TYPE value);
+static FAST_JSON_ERROR_ENUM fast_json_add_array_end (FAST_JSON_TYPE json,
+						     FAST_JSON_DATA_TYPE
+						     array,
+						     FAST_JSON_DATA_TYPE
+						     value);
+static FAST_JSON_ERROR_ENUM fast_json_add_object_end (FAST_JSON_TYPE json,
+						      FAST_JSON_DATA_TYPE
+						      object,
+						      const char *name,
+						      FAST_JSON_DATA_TYPE
+						      value);
 static void fast_json_update_crc (unsigned int *crc, const char *str);
 static FAST_JSON_ERROR_ENUM fast_json_parse_crc (FAST_JSON_TYPE json,
 						 unsigned int *crc, int c);
@@ -499,7 +512,7 @@ fast_json_getc_save (FAST_JSON_TYPE json)
 
   if (c > 0) {
     if (json->n_save + 2 > json->max_save) {
-      unsigned int new_max = json->max_save + 4096;
+      unsigned int new_max = json->max_save + FAST_JSON_BUFFER_SIZE;
       char *new_save;
 
       new_save = (char *) json->my_realloc (json->save, new_max);
@@ -519,7 +532,7 @@ fast_json_getc_save_start (FAST_JSON_TYPE json, int c)
 {
   json->n_save = 0;
   if (json->max_save == 0) {
-    unsigned int new_max = 4096;
+    unsigned int new_max = FAST_JSON_BUFFER_SIZE;
     char *new_save;
 
     new_save = (char *) json->my_realloc (json->save, new_max);
@@ -1120,7 +1133,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	fast_json_value_free (json, v);
 	return NULL;
       }
-      if (fast_json_add_array (json, v, n) != FAST_JSON_OK) {
+      if (fast_json_add_array_end (json, v, n) != FAST_JSON_OK) {
 	fast_json_value_free (json, n);
 	fast_json_value_free (json, v);
 	return NULL;
@@ -1228,7 +1241,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	fast_json_value_free (json, v);
 	return NULL;
       }
-      if (fast_json_add_object (json, v, out, n) != FAST_JSON_OK) {
+      if (fast_json_add_object_end (json, v, out, n) != FAST_JSON_OK) {
 	fast_json_value_free (json, n);
 	if (out != &name[0]) {
 	  (*json->my_free) (out);
@@ -1278,7 +1291,7 @@ fast_json_create (fast_json_malloc_type malloc_fn,
     json->my_malloc = malloc_fn ? malloc_fn : malloc;
     json->my_realloc = malloc_fn ? realloc_fn : realloc;
     json->my_free = free_fn ? free_fn : free;
-    json->decimal_point = *localeconv()->decimal_point;
+    json->decimal_point = *localeconv ()->decimal_point;
   }
   return json;
 }
@@ -1420,7 +1433,7 @@ fast_json_parse_all (FAST_JSON_TYPE json)
   json->column = 0;
   json->position = 0;
   json->last_char = 0;
-  json->decimal_point = *localeconv()->decimal_point;
+  json->decimal_point = *localeconv ()->decimal_point;
   if (fast_json_skip_whitespace (json, &c) == FAST_JSON_OK) {
     if (c != FAST_JSON_EOF) {
       v = fast_json_parse_value (json, c);
@@ -1893,51 +1906,54 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	}
       }
       {
-        double n;
+	double n;
 
 	if (dp && json->decimal_point != '.') {
-          char e;
+	  char e;
 	  char b[100];
 	  char *s = &b[0];
 
 	  if ((value - save) >= sizeof (b)) {
 	    s = (char *) (*json->my_malloc) ((value - save) + 1);
 	    if (s == NULL) {
-	      fast_json_store_error2 (json, FAST_JSON_MALLOC_ERROR, save, ":,]}");
+	      fast_json_store_error2 (json, FAST_JSON_MALLOC_ERROR, save,
+				      ":,]}");
 	      return NULL;
 	    }
 	  }
 	  memcpy (s, save, value - save);
 	  s[value - save] = '\0';
 	  s[dp - save] = json->decimal_point;
-          errno = 0;
+	  errno = 0;
 #if USE_FAST_CONVERT
-          n = fast_strtod (s, &end);
+	  n = fast_strtod (s, &end);
 #else
-          n = strtod (s, &end);
+	  n = strtod (s, &end);
 #endif
 	  e = *end;
 	  if (s != &b[0]) {
 	    (*json->my_free) (s);
 	  }
-          if (e != '\0' || errno == ERANGE) {
-	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save, ":,]}");
+	  if (e != '\0' || errno == ERANGE) {
+	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save,
+				    ":,]}");
 	    return NULL;
-          }
+	  }
 	}
 	else {
-          errno = 0;
+	  errno = 0;
 #if USE_FAST_CONVERT
-          n = fast_strtod (save, &end);
+	  n = fast_strtod (save, &end);
 #else
-          n = strtod (save, &end);
+	  n = strtod (save, &end);
 #endif
-          if (end != value || errno == ERANGE) {
-	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save, ":,]}");
+	  if (end != value || errno == ERANGE) {
+	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save,
+				    ":,]}");
 	    return NULL;
-          }
+	  }
 	}
-        v = fast_json_create_double_value (json, n);
+	v = fast_json_create_double_value (json, n);
       }
     }
     break;
@@ -1962,7 +1978,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	fast_json_value_free (json, v);
 	return NULL;
       }
-      if (fast_json_add_array (json, v, n) != FAST_JSON_OK) {
+      if (fast_json_add_array_end (json, v, n) != FAST_JSON_OK) {
 	fast_json_value_free (json, n);
 	fast_json_value_free (json, v);
 	return NULL;
@@ -2079,7 +2095,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	  fast_json_value_free (json, v);
 	  return NULL;
 	}
-	if (fast_json_add_object (json, v, out, n) != FAST_JSON_OK) {
+	if (fast_json_add_object_end (json, v, out, n) != FAST_JSON_OK) {
 	  fast_json_value_free (json, n);
 	  if (out != &name[0]) {
 	    (*json->my_free) (out);
@@ -2133,7 +2149,7 @@ fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
   json->line = 1;
   json->column = 0;
   json->position = 0;
-  json->decimal_point = *localeconv()->decimal_point;
+  json->decimal_point = *localeconv ()->decimal_point;
   if (fast_json_skip_whitespace2 (json, &json_str) == FAST_JSON_OK) {
     if (*json_str != '\0') {
       v = fast_json_parse_value2 (json, &json_str);
@@ -2236,12 +2252,10 @@ fast_json_value_equal (FAST_JSON_DATA_TYPE value1, FAST_JSON_DATA_TYPE value2)
       break;
     case FAST_JSON_STRING:
       {
-	char *str1 =
-	  value1->is_str ? &value1->u.i_string_value[0] : value1->
-	  u.string_value;
-	char *str2 =
-	  value2->is_str ? &value2->u.i_string_value[0] : value2->
-	  u.string_value;
+	char *str1 = value1->is_str ? &value1->u.i_string_value[0]
+	  : value1->u.string_value;
+	char *str2 = value2->is_str ? &value2->u.i_string_value[0]
+	  : value2->u.string_value;
 
 	if (strcmp (str1, str2) != 0) {
 	  return 0;
@@ -2285,7 +2299,7 @@ fast_json_value_copy (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value)
 	  for (i = 0; i < o->len; i++) {
 	    nv = fast_json_value_copy (json, o->data[i].value);
 	    if (nv) {
-	      if (fast_json_add_object (json, v, o->data[i].name, nv) !=
+	      if (fast_json_add_object_end (json, v, o->data[i].name, nv) !=
 		  FAST_JSON_OK) {
 		fast_json_value_free (json, v);
 		v = NULL;
@@ -2312,7 +2326,7 @@ fast_json_value_copy (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value)
 	  for (i = 0; i < a->len; i++) {
 	    nv = fast_json_value_copy (json, a->values[i]);
 	    if (nv) {
-	      if (fast_json_add_array (json, v, nv) != FAST_JSON_OK) {
+	      if (fast_json_add_array_end (json, v, nv) != FAST_JSON_OK) {
 		fast_json_value_free (json, v);
 		v = NULL;
 		break;
@@ -2414,7 +2428,9 @@ static int
 fast_json_puts_string (FAST_JSON_TYPE json, const char *str, unsigned int len)
 {
   if ((json->u.buf.len + len) > json->u.buf.max) {
-    unsigned int new_max = json->u.buf.max + ((len + 4095) / 4096) * 4096;
+    unsigned int new_max = json->u.buf.max +
+      ((len + (FAST_JSON_BUFFER_SIZE - 1)) /
+       FAST_JSON_BUFFER_SIZE) * FAST_JSON_BUFFER_SIZE;
     char *new_txt;
 
     new_txt = (char *) (*json->my_realloc) (json->u.buf.txt, new_max);
@@ -2795,9 +2811,9 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
       }
     case FAST_JSON_STRING:
       return fast_json_print_string_value (json,
-					   value->is_str ? &value->
-					   u.i_string_value[0] : value->
-					   u.string_value);
+					   value->is_str
+					   ? &value->u.i_string_value[0]
+					   : value->u.string_value);
     case FAST_JSON_BOOLEAN:
       {
 	const char *v = value->u.boolean_value ? "true" : "false";
@@ -2821,7 +2837,7 @@ fast_json_print_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->u.buf.len = 0;
     json->u.buf.max = 0;
     json->u.buf.txt = NULL;
-    json->decimal_point = *localeconv()->decimal_point;
+    json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       (*json->my_free) (json->u.buf.txt);
       return NULL;
@@ -2845,7 +2861,7 @@ fast_json_print_string_len (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->u.buf.len = 0;
     json->u.buf.max = len;
     json->u.buf.txt = str;
-    json->decimal_point = *localeconv()->decimal_point;
+    json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
     }
@@ -2865,7 +2881,7 @@ fast_json_print_file (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->puts = fast_json_puts_file;
     json->puts_len = 0;
     json->u.fp = fp;
-    json->decimal_point = *localeconv()->decimal_point;
+    json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
     }
@@ -2890,7 +2906,7 @@ fast_json_print_file_name (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
       json->puts = fast_json_puts_file;
       json->puts_len = 0;
       json->u.fp = fp;
-      json->decimal_point = *localeconv()->decimal_point;
+      json->decimal_point = *localeconv ()->decimal_point;
       retval = fast_json_print_buffer (json, value, 0, nice);
       if (retval == 0) {
 	retval = fast_json_last_puts (json, "\n", nice ? 1 : 0);
@@ -2909,7 +2925,7 @@ fast_json_print_fd (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     json->puts = fast_json_puts_fd;
     json->puts_len = 0;
     json->u.fd.fd = fd;
-    json->decimal_point = *localeconv()->decimal_point;
+    json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
     }
@@ -3035,13 +3051,13 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
   if (json && value) {
     int len = strlen (value);
     char str[8];
-    char *new_value = (char *) value;
+    char *new_value = &str[0];
 
     if (len >= sizeof (str)) {
       new_value = fast_json_strdup (json, value);
     }
     else {
-      new_value = strcpy (str, value);
+      strcpy (str, value);
     }
     if (new_value) {
       if (fast_json_check_string (json, value, new_value) == FAST_JSON_OK) {
@@ -3059,7 +3075,7 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
 	  }
 	}
       }
-      else {
+      else if (new_value != &str[0]) {
 	(*json->my_free) (new_value);
       }
     }
@@ -3117,7 +3133,7 @@ fast_json_create_boolean_array (FAST_JSON_TYPE json,
 	  fast_json_value_free (json, array);
 	  return NULL;
 	}
-	if (fast_json_add_array (json, array, v) != FAST_JSON_OK) {
+	if (fast_json_add_array_end (json, array, v) != FAST_JSON_OK) {
 	  fast_json_value_free (json, v);
 	  fast_json_value_free (json, array);
 	  return NULL;
@@ -3131,8 +3147,7 @@ fast_json_create_boolean_array (FAST_JSON_TYPE json,
 
 FAST_JSON_DATA_TYPE
 fast_json_create_integer_array (FAST_JSON_TYPE json,
-				const fast_json_int_64 * numbers,
-				size_t len)
+				const fast_json_int_64 * numbers, size_t len)
 {
   if (json) {
     FAST_JSON_DATA_TYPE array = fast_json_create_array (json);
@@ -3148,7 +3163,7 @@ fast_json_create_integer_array (FAST_JSON_TYPE json,
 	  fast_json_value_free (json, array);
 	  return NULL;
 	}
-	if (fast_json_add_array (json, array, v) != FAST_JSON_OK) {
+	if (fast_json_add_array_end (json, array, v) != FAST_JSON_OK) {
 	  fast_json_value_free (json, v);
 	  fast_json_value_free (json, array);
 	  return NULL;
@@ -3178,7 +3193,7 @@ fast_json_create_double_array (FAST_JSON_TYPE json, const double *numbers,
 	  fast_json_value_free (json, array);
 	  return NULL;
 	}
-	if (fast_json_add_array (json, array, v) != FAST_JSON_OK) {
+	if (fast_json_add_array_end (json, array, v) != FAST_JSON_OK) {
 	  fast_json_value_free (json, v);
 	  fast_json_value_free (json, array);
 	  return NULL;
@@ -3207,7 +3222,7 @@ fast_json_create_string_array (FAST_JSON_TYPE json, const char **strings,
 	  fast_json_value_free (json, array);
 	  return NULL;
 	}
-	if (fast_json_add_array (json, array, v) != FAST_JSON_OK) {
+	if (fast_json_add_array_end (json, array, v) != FAST_JSON_OK) {
 	  fast_json_value_free (json, v);
 	  fast_json_value_free (json, array);
 	  return NULL;
@@ -3262,6 +3277,46 @@ fast_json_check_loop (FAST_JSON_DATA_TYPE data, FAST_JSON_DATA_TYPE value)
   return 0;
 }
 
+static FAST_JSON_ERROR_ENUM
+fast_json_add_array_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
+			 FAST_JSON_DATA_TYPE value)
+{
+  FAST_JSON_ERROR_ENUM retval = FAST_JSON_MALLOC_ERROR;
+  FAST_JSON_ARRAY_TYPE *a = array->u.array;
+
+  if (a == NULL) {
+    unsigned int size = sizeof (FAST_JSON_ARRAY_TYPE) +
+      (FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_DATA_TYPE);
+
+    a = array->u.array = (FAST_JSON_ARRAY_TYPE *) (*json->my_malloc) (size);
+    if (a) {
+      a->len = 0;
+      a->max = FAST_JSON_INITIAL_SIZE;
+    }
+  }
+  if (a) {
+    if (a->len == a->max) {
+      unsigned int l = a->max ? a->max * 2 : 1;
+      unsigned int size = sizeof (FAST_JSON_ARRAY_TYPE) +
+	(l - 1) * sizeof (FAST_JSON_DATA_TYPE);
+      FAST_JSON_ARRAY_TYPE *na =
+	(FAST_JSON_ARRAY_TYPE *) (*json->my_realloc) (a, size);
+
+      if (na) {
+	a = array->u.array = na;
+	a->max = l;
+      }
+    }
+    if (a->len != a->max) {
+      array->used = 1;
+      value->used = 1;
+      a->values[a->len++] = value;
+      retval = FAST_JSON_OK;
+    }
+  }
+  return retval;
+}
+
 FAST_JSON_ERROR_ENUM
 fast_json_add_array (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
 		     FAST_JSON_DATA_TYPE value)
@@ -3273,35 +3328,62 @@ fast_json_add_array (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
        array->used == 0 || value->used == 0 ||
        (fast_json_check_loop (array, value) == 0 &&
 	fast_json_check_loop (value, array) == 0))) {
-    FAST_JSON_ARRAY_TYPE *a = array->u.array;
+    retval = fast_json_add_array_end (json, array, value);
+  }
+  return retval;
+}
 
-    if (a == NULL) {
-      unsigned int size = sizeof (FAST_JSON_ARRAY_TYPE) +
-	(FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_DATA_TYPE);
+static FAST_JSON_ERROR_ENUM
+fast_json_add_object_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
+			  const char *name, FAST_JSON_DATA_TYPE value)
+{
+  FAST_JSON_ERROR_ENUM retval = FAST_JSON_MALLOC_ERROR;
+  FAST_JSON_OBJECT_TYPE *o = object->u.object;
 
-      a = array->u.array = (FAST_JSON_ARRAY_TYPE *) (*json->my_malloc) (size);
-      if (a) {
-	a->len = 0;
-	a->max = FAST_JSON_INITIAL_SIZE;
+  if (o == NULL) {
+    size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
+      (FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
+
+    o = object->u.object =
+      (FAST_JSON_OBJECT_TYPE *) (*json->my_malloc) (size);
+    if (o) {
+      o->len = 0;
+      o->max = FAST_JSON_INITIAL_SIZE;
+    }
+  }
+  else {
+    size_t l;
+
+    for (l = 0; l < o->len; l++) {
+      if (strcmp (o->data[l].name, name) == 0) {
+	fast_json_value_free (json, o->data[l].value);
+	o->data[l].value = value;
+	retval = FAST_JSON_OK;
+	return retval;
       }
     }
-    if (a) {
-      if (a->len == a->max) {
-	unsigned int l = a->max ? a->max * 2 : 1;
-	unsigned int size = sizeof (FAST_JSON_ARRAY_TYPE) +
-	  (l - 1) * sizeof (FAST_JSON_DATA_TYPE);
-	FAST_JSON_ARRAY_TYPE *na =
-	  (FAST_JSON_ARRAY_TYPE *) (*json->my_realloc) (a, size);
+  }
+  if (o) {
+    if (o->len == o->max) {
+      size_t l = o->max ? o->max * 2 : 1;
+      size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
+	(l - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
 
-	if (na) {
-	  a = array->u.array = na;
-	  a->max = l;
-	}
+      FAST_JSON_OBJECT_TYPE *no =
+	(FAST_JSON_OBJECT_TYPE *) (*json->my_realloc) (o, size);
+
+      if (no) {
+	o = object->u.object = no;
+	o->max = l;
       }
-      if (a->len != a->max) {
-	array->used = 1;
-	value->used = 1;
-	a->values[a->len++] = value;
+    }
+    if (o->len != o->max) {
+      object->used = 1;
+      value->used = 1;
+      o->data[o->len].name = fast_json_strdup (json, name);
+      o->data[o->len].value = value;
+      if (o->data[o->len].name != NULL) {
+	o->len++;
 	retval = FAST_JSON_OK;
       }
     }
@@ -3320,56 +3402,7 @@ fast_json_add_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
        object->used == 0 || value->used == 0 ||
        (fast_json_check_loop (object, value) == 0 &&
 	fast_json_check_loop (value, object) == 0))) {
-    FAST_JSON_OBJECT_TYPE *o = object->u.object;
-
-    if (o == NULL) {
-      size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
-	(FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
-
-      o = object->u.object =
-	(FAST_JSON_OBJECT_TYPE *) (*json->my_malloc) (size);
-      if (o) {
-	o->len = 0;
-	o->max = FAST_JSON_INITIAL_SIZE;
-      }
-    }
-    else {
-      size_t l;
-
-      for (l = 0; l < o->len; l++) {
-	if (strcmp (o->data[l].name, name) == 0) {
-	  fast_json_value_free (json, o->data[l].value);
-	  o->data[l].value = value;
-	  retval = FAST_JSON_OK;
-	  return retval;
-	}
-      }
-    }
-    if (o) {
-      if (o->len == o->max) {
-	size_t l = o->max ? o->max * 2 : 1;
-	size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
-	  (l - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
-
-	FAST_JSON_OBJECT_TYPE *no =
-	  (FAST_JSON_OBJECT_TYPE *) (*json->my_realloc) (o, size);
-
-	if (no) {
-	  o = object->u.object = no;
-	  o->max = l;
-	}
-      }
-      if (o->len != o->max) {
-	object->used = 1;
-	value->used = 1;
-	o->data[o->len].name = fast_json_strdup (json, name);
-	o->data[o->len].value = value;
-	if (o->data[o->len].name != NULL) {
-	  o->len++;
-	  retval = FAST_JSON_OK;
-	}
-      }
-    }
+    retval = fast_json_add_object_end (json, object, name, value);
   }
   return retval;
 }
@@ -3407,7 +3440,7 @@ fast_json_insert_array (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
        array->used == 0 || value->used == 0 ||
        (fast_json_check_loop (array, value) == 0 &&
 	fast_json_check_loop (value, array) == 0))) {
-    retval = fast_json_add_array (json, array, value);
+    retval = fast_json_add_array_end (json, array, value);
     if (retval == FAST_JSON_OK) {
       size_t i;
       FAST_JSON_DATA_TYPE *value_array = array->u.array->values;
@@ -3478,7 +3511,7 @@ fast_json_insert_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
        object->used == 0 || value->used == 0 ||
        (fast_json_check_loop (object, value) == 0 &&
 	fast_json_check_loop (value, object) == 0))) {
-    retval = fast_json_add_object (json, object, name, value);
+    retval = fast_json_add_object_end (json, object, name, value);
     if (retval == FAST_JSON_OK) {
       size_t i;
       FAST_JSON_NAME_VALUE_TYPE *data = object->u.object->data;

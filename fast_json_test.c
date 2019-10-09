@@ -44,7 +44,7 @@ parser_check_error (FAST_JSON_TYPE json, const char *str,
   }
   if (fast_json_parser_line (json) != line) {
     fprintf (stderr, "Unexpected line: expected %u, received %lu\n",
-	     line, fast_json_parser_line (json));
+	     line, (unsigned long) fast_json_parser_line (json));
     exit (1);
   }
   if (strcmp (fast_json_parser_error_str (json), error_str) != 0) {
@@ -67,7 +67,7 @@ parser_check_error (FAST_JSON_TYPE json, const char *str,
   }
   if (fast_json_parser_line (json) != line) {
     fprintf (stderr, "Unexpected line: expected %u, received %lu\n",
-	     line, fast_json_parser_line (json));
+	     line, (unsigned long) fast_json_parser_line (json));
     exit (1);
   }
   if (strcmp (fast_json_parser_error_str (json), error_str2) != 0) {
@@ -83,7 +83,7 @@ parser_check_noerror (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE v)
 {
   if (v == NULL) {
     fprintf (stderr, "Unexpected error: %lu:%s '%20.20s'\n",
-	     fast_json_parser_line (json),
+	     (unsigned long) fast_json_parser_line (json),
 	     fast_json_error_str (fast_json_parser_error (json)),
 	     fast_json_parser_error_str (json));
     exit (1);
@@ -185,7 +185,6 @@ main (void)
 {
   unsigned int i;
   unsigned int j;
-  double dval;
   char *cp;
   char *np;
   FILE *fp;
@@ -210,23 +209,23 @@ main (void)
   fast_json_parse_string (json, "\n\n\n\n\n      -");
   if (fast_json_parser_column (json) != 7) {
     fprintf (stderr, "Unexpected column: expected 7, received %lu\n",
-	     fast_json_parser_column (json));
+	     (unsigned long) fast_json_parser_column (json));
     exit (1);
   }
   if (fast_json_parser_position (json) != 12) {
     fprintf (stderr, "Unexpected position: expected 12, received %lu\n",
-	     fast_json_parser_position (json));
+	     (unsigned long) fast_json_parser_position (json));
     exit (1);
   }
   fast_json_parse_string2 (json, "\n\n\n\n\n      -");
   if (fast_json_parser_column (json) != 7) {
     fprintf (stderr, "Unexpected column: expected 7, received %lu\n",
-	     fast_json_parser_column (json));
+	     (unsigned long) fast_json_parser_column (json));
     exit (1);
   }
   if (fast_json_parser_position (json) != 12) {
     fprintf (stderr, "Unexpected position: expected 12, received %lu\n",
-	     fast_json_parser_position (json));
+	     (unsigned long) fast_json_parser_position (json));
     exit (1);
   }
   parser_check_error (json, "\n\n\n\n\n      -", FAST_JSON_NUMBER_ERROR, 6,
@@ -1584,7 +1583,7 @@ main (void)
     exit (1);
   }
 
-  j = 30000;
+  j = 10000;
   cp = (char *) malloc (j * 10);
   np = cp;
   for (i = 0; i < j; i++) {
@@ -1625,7 +1624,9 @@ main (void)
     exit (1);
   }
   fast_json_value_free (json, n);
+  free (cp);
 
+#ifndef WIN
   setlocale (LC_ALL, "nl_NL.UTF-8");
   localeconv(); /* will normally be called in parser */
 #if USE_FAST_CONVERT
@@ -1637,14 +1638,17 @@ main (void)
     fprintf (stderr, "Locale does not work '%s'\n", str);
     exit (1);
   }
+  {
+    double dval;
 #if USE_FAST_CONVERT
-  dval = fast_strtod (str, NULL);
+    dval = fast_strtod (str, NULL);
 #else
-  dval = strtod (str, NULL);
+    dval = strtod (str, NULL);
 #endif
-  if (dval != 12.34) {
-    fprintf (stderr, "Locale does not work '%g'\n", dval);
-    exit (1);
+    if (dval != 12.34) {
+      fprintf (stderr, "Locale does not work '%g'\n", dval);
+      exit (1);
+    }
   }
   n = fast_json_parse_string (json, "12.34");
   if (n == NULL) {
@@ -1658,6 +1662,7 @@ main (void)
     exit (1);
   }
   fast_json_value_free (json, n);
+#endif
 
   fast_json_free (json);
 

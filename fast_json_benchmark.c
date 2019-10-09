@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include "fast_json.h"
 
 #define RAND_IA         __UINT64_C(0x5851F42D4C957F2D)
@@ -89,10 +90,17 @@ my_free (void *ptr)
 static double
 get_time (void)
 {
+#if WIN
+  struct timeval tv;
+
+  gettimeofday (&tv, NULL);
+  return ((double)tv.tv_sec) *1e9 + ((double) tv.tv_usec) * 1e3;
+#else
   struct timespec curtime;
 
   clock_gettime (CLOCK_REALTIME, &curtime);
   return ((double) curtime.tv_sec) * 1e9 + ((double) curtime.tv_nsec);
+#endif
 }
 
 int
@@ -197,9 +205,9 @@ main (int argc, char **argv)
       printf ("Error: %s '%s' at %lu:%lu:%lu\n",
 	      fast_json_error_str (fast_json_parser_error (json)),
 	      fast_json_parser_error_str (json),
-	      fast_json_parser_line (json),
-	      fast_json_parser_column (json),
-	      fast_json_parser_position (json));
+	      (unsigned long) fast_json_parser_line (json),
+	      (unsigned long) fast_json_parser_column (json),
+	      (unsigned long) fast_json_parser_position (json));
       exit (1);
     }
   }
@@ -293,9 +301,9 @@ main (int argc, char **argv)
 	printf ("Error: %s '%s' at %lu:%lu:%lu\n",
 		fast_json_error_str (fast_json_parser_error(json)),
 		fast_json_parser_error_str (json),
-		fast_json_parser_line (json),
-		fast_json_parser_column (json),
-		fast_json_parser_position (json));
+		(unsigned long) fast_json_parser_line (json),
+		(unsigned long) fast_json_parser_column (json),
+		(unsigned long) fast_json_parser_position (json));
 	break;
       }
       fast_json_value_free (json, o);

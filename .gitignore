@@ -3,7 +3,13 @@ fast_json_benchmark
 fast_json_benchmarkf
 fast_json_test
 fast_json_testf
+fast_json_random
 libfast_json.a
 libfast_json.so
 libfast_jsonf.a
-sf-city-lots-json
+fast_json_benchmark.exe
+fast_json_benchmarkf.exe
+fast_json_test.exe
+fast_json_testf.exe
+random.json
+doc
