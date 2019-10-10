@@ -230,10 +230,8 @@ main (void)
   }
   parser_check_error (json, "\n\n\n\n\n      -", FAST_JSON_NUMBER_ERROR, 6,
 		      "-", "-");
-  parser_check_error (json, "\"\\ujjjj\"", FAST_JSON_UNICODE_ERROR, 1, "jjjj",
-		      "\\ujjjj\"");
-  parser_check_error (json, "\"\\u0000\"", FAST_JSON_UNICODE_0_ERROR, 1,
-		      "0000", "\\u0000\"");
+  parser_check_error (json, "\"\\ujjjj\"", FAST_JSON_UNICODE_ESCAPE_ERROR, 1,
+		      "jjjj", "\\ujjjj\"");
   parser_check_error (json, "{ [", FAST_JSON_STRING_START_ERROR, 1, "", "");
   parser_check_error (json, "{\"a :", FAST_JSON_STRING_END_ERROR, 1, "a :",
 		      "a ");
@@ -249,14 +247,22 @@ main (void)
   parser_check_error (json, "tail", FAST_JSON_VALUE_ERROR, 1, "tail", "tail");
   parser_check_error (json, "/test", FAST_JSON_COMMENT_ERROR, 1, "/t",
 		      "/test");
+  parser_check_error (json, "0.", FAST_JSON_NUMBER_ERROR, 1, "0.", "0.");
+  parser_check_error (json, "0e", FAST_JSON_NUMBER_ERROR, 1, "0e", "0e");
 
   tst_error (fast_json_error_str (FAST_JSON_OK), "OK");
   tst_error (fast_json_error_str (FAST_JSON_MALLOC_ERROR), "Malloc error");
   tst_error (fast_json_error_str (FAST_JSON_COMMENT_ERROR), "Comment error");
   tst_error (fast_json_error_str (FAST_JSON_NUMBER_ERROR), "Number error");
+  tst_error (fast_json_error_str (FAST_JSON_CONTROL_CHARACTER_ERROR),
+	     "Control character error");
+  tst_error (fast_json_error_str (FAST_JSON_ESCAPE_CHARACTER_ERROR),
+	     "Escape character error");
+  tst_error (fast_json_error_str (FAST_JSON_UTF8_ERROR),
+	     "UTF8 character error");
   tst_error (fast_json_error_str (FAST_JSON_UNICODE_ERROR), "Unicode error");
-  tst_error (fast_json_error_str (FAST_JSON_UNICODE_0_ERROR),
-	     "Unicode 0 error");
+  tst_error (fast_json_error_str (FAST_JSON_UNICODE_ESCAPE_ERROR),
+	     "Unicode escape error");
   tst_error (fast_json_error_str (FAST_JSON_STRING_START_ERROR),
 	     "String start error");
   tst_error (fast_json_error_str (FAST_JSON_STRING_END_ERROR),
@@ -270,6 +276,7 @@ main (void)
 	     "Object end error");
   tst_error (fast_json_error_str (FAST_JSON_PARSE_ERROR), "Parse error");
   tst_error (fast_json_error_str (FAST_JSON_NO_DATA_ERROR), "No data error");
+  tst_error (fast_json_error_str (FAST_JSON_LOOP_ERROR), "Loop error");
   tst_error (fast_json_error_str (FAST_JSON_INDEX_ERROR), "Index error");
   if (fast_json_error_str ((FAST_JSON_ERROR_ENUM) - 1) != NULL) {
     fprintf (stderr, "Unexpected error\n");
@@ -282,14 +289,15 @@ main (void)
   parser_check_error (json, "+inf", FAST_JSON_NUMBER_ERROR, 1, "+", "+inf");
   parser_check_error (json, "-inf", FAST_JSON_NUMBER_ERROR, 1, "-inf",
 		      "-inf");
-  parser_check_error (json, "infinity", FAST_JSON_NUMBER_ERROR, 1, "infinity",
+  parser_check_error (json, "infinity", FAST_JSON_VALUE_ERROR, 1, "infinity",
 		      "infinity");
-  parser_check_error (json, "nan", FAST_JSON_NUMBER_ERROR, 1, "nan", "nan");
+  parser_check_error (json, "nan", FAST_JSON_VALUE_ERROR, 1, "nan", "nan");
   parser_check_error (json, "+nan", FAST_JSON_NUMBER_ERROR, 1, "+", "+nan");
   parser_check_error (json, "-nan", FAST_JSON_NUMBER_ERROR, 1, "-nan",
 		      "-nan");
-  parser_check_error (json, "nan(123)", FAST_JSON_NUMBER_ERROR, 1, "nan",
+  parser_check_error (json, "nan(123)", FAST_JSON_VALUE_ERROR, 1, "nan",
 		      "nan(123)");
+
   fast_json_options (json, FAST_JSON_INF_NAN);
   parser_check_error (json, "nan(123", FAST_JSON_NUMBER_ERROR, 1, "nan(123",
 		      "nan(123");
@@ -419,14 +427,15 @@ main (void)
   fast_json_release_print_value (json, cp);
   v =
     fast_json_parse_string (json,
-			    "\"\\u12aB\\u0020\\u0123\\uD834\\uDD1E\\\\\\/\\b\\f\\n\\r\\t\\\"\"");
+			    "\"\\u12aB\\u0020\\u0123\\uD834\\uDD1E\\u0000\\\\\\/\\b\\f\\n\\r\\t\\\"\"");
   cp = fast_json_print_string (json, v, 0);
   parser_check_noerror (json, v);
   if (strcmp
       (cp,
-       "\"\\u12AB \\u0123\\uD834\\uDD1E\\\\\\/\\b\\f\\n\\r\\t\\\"\"") != 0) {
+       "\"\341\212\253 \304\243\360\235\204\236\\u0000\\\\\\/\\b\\f\\n\\r\\t\\\"\"")
+      != 0) {
     fprintf (stderr, "Unexpected string: expected '%s', received '%s'\n",
-	     "\"\\u12AB \\u0123\\uD834\\uDD1E\\\\\\/\\b\\f\\n\\r\\t\\\"\"",
+	     "\"\341\212\253 \304\243\360\235\204\236\\u0000\\\\\\/\\b\\f\\n\\r\\t\\\"\"",
 	     cp);
     exit (1);
   }
@@ -481,14 +490,15 @@ main (void)
   fast_json_release_print_value (json, cp);
   v =
     fast_json_parse_string2 (json,
-			     "\"\\u12aB\\u0020\\u0123\\uD834\\uDD1E\\\\\\/\\b\\f\\n\\r\\t\\\"\"");
+			     "\"\\u12aB\\u0020\\u0123\\uD834\\uDD1E\\u0000\\\\\\/\\b\\f\\n\\r\\t\\\"\"");
   cp = fast_json_print_string (json, v, 0);
   parser_check_noerror (json, v);
   if (strcmp
       (cp,
-       "\"\\u12AB \\u0123\\uD834\\uDD1E\\\\\\/\\b\\f\\n\\r\\t\\\"\"") != 0) {
+       "\"\341\212\253 \304\243\360\235\204\236\\u0000\\\\\\/\\b\\f\\n\\r\\t\\\"\"")
+      != 0) {
     fprintf (stderr, "Unexpected string: expected '%s', received '%s'\n",
-	     "\"\\u12AB \\u0123\\uD834\\uDD1E\\\\\\/\\b\\f\\n\\r\\t\\\"\"",
+	     "\"\341\212\253 \304\243\360\235\204\236\\u0000\\\\\\/\\b\\f\\n\\r\\t\\\"\"",
 	     cp);
     exit (1);
   }
@@ -661,7 +671,7 @@ main (void)
 				    sizeof (int_numbers) /
 				    sizeof (int_numbers[0]));
   e = fast_json_patch_array (json, v, v, 1);
-  if (e != FAST_JSON_INDEX_ERROR) {
+  if (e != FAST_JSON_LOOP_ERROR) {
     fprintf (stderr, "Unexpected error: %s\n", fast_json_error_str (e));
     exit (1);
   }
@@ -713,7 +723,7 @@ main (void)
 				    sizeof (int_numbers) /
 				    sizeof (int_numbers[0]));
   e = fast_json_insert_array (json, v, v, 1);
-  if (e != FAST_JSON_INDEX_ERROR) {
+  if (e != FAST_JSON_LOOP_ERROR) {
     fprintf (stderr, "Unexpected error: %s\n", fast_json_error_str (e));
     exit (1);
   }
@@ -791,7 +801,7 @@ main (void)
 			fast_json_create_integer_value (json, 1));
   n = fast_json_create_integer_value (json, 2);
   e = fast_json_patch_object (json, v, v, 0);
-  if (e != FAST_JSON_INDEX_ERROR) {
+  if (e != FAST_JSON_LOOP_ERROR) {
     fprintf (stderr, "Unexpected error: %s\n", fast_json_error_str (e));
     exit (1);
   }
@@ -851,7 +861,7 @@ main (void)
 			fast_json_create_integer_value (json, 1));
   n = fast_json_create_integer_value (json, 2);
   e = fast_json_insert_object (json, v, "b", v, 0);
-  if (e != FAST_JSON_INDEX_ERROR) {
+  if (e != FAST_JSON_LOOP_ERROR) {
     fprintf (stderr, "Unexpected error: %s\n", fast_json_error_str (e));
     exit (1);
   }
@@ -1207,6 +1217,13 @@ main (void)
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, v);
 
+  fast_json_parse_string (json, "0x0.");
+  if (fast_json_parser_error (json) != FAST_JSON_NUMBER_ERROR) {
+    fprintf (stderr, "Number error expected : %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
   v =
     fast_json_parse_string2 (json,
 			     "[ { \"a\":1 }, -1.0, \"s\", true, null ]");
@@ -1258,6 +1275,13 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, v);
+
+  fast_json_parse_string2 (json, "0x0.");
+  if (fast_json_parser_error (json) != FAST_JSON_NUMBER_ERROR) {
+    fprintf (stderr, "Number error expected : %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
 
   fast_json_options (json, FAST_JSON_INF_NAN);
   e = fast_json_calc_crc_string (json, "{\"name\": \"abc\"}", &i);
@@ -1561,7 +1585,7 @@ main (void)
 
   n = fast_json_parse_string (json, str);
   cp = fast_json_print_string (json, n, 0);
-  if (strcmp (cp, "[\"\\u07F0\\uFEFF\\uDB02\\uDC30\"]") != 0) {
+  if (strcmp (cp, "[\"\337\260\357\273\277\363\220\240\260\"]") != 0) {
     fprintf (stderr, "utf8 error '%s'\n", cp);
     exit (1);
   }
@@ -1577,8 +1601,72 @@ main (void)
   str[6] = ']';
   str[7] = '\0';
   fast_json_parse_string (json, str);
-  if (fast_json_parser_error (json) != FAST_JSON_UNICODE_ERROR) {
+  if (fast_json_parser_error (json) != FAST_JSON_UTF8_ERROR) {
     fprintf (stderr, "utf8 error expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
+  strcpy (str, "\"\\uD834\\pDB1E\"");
+  fast_json_parse_string (json, str);
+  if (fast_json_parser_error (json) != FAST_JSON_UNICODE_ERROR) {
+    fprintf (stderr, "unicode error expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
+  strcpy (str, "\"\\uD834\\uDB1u\"");
+  fast_json_parse_string (json, str);
+  if (fast_json_parser_error (json) != FAST_JSON_UNICODE_ESCAPE_ERROR) {
+    fprintf (stderr, "unicode escape error expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
+  strcpy (str, "\"\\uD834\\uDB1E\"");
+  fast_json_parse_string (json, str);
+  if (fast_json_parser_error (json) != FAST_JSON_UNICODE_ERROR) {
+    fprintf (stderr, "unicode error expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
+  strcpy (str, "\"\\uDC34\"");
+  fast_json_parse_string (json, str);
+  if (fast_json_parser_error (json) != FAST_JSON_UNICODE_ERROR) {
+    fprintf (stderr, "unicode error expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
+  strcpy (str, "\"\\u0022\\u005C\"");
+  n = fast_json_parse_string (json, str);
+  if (fast_json_parser_error (json) != FAST_JSON_OK) {
+    fprintf (stderr, "ok expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+  fast_json_value_free (json, n);
+
+  fast_json_create_string (json, "\"");
+  if (fast_json_parser_error (json) != FAST_JSON_ESCAPE_CHARACTER_ERROR) {
+    fprintf (stderr, "unicode escape error expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
+  strcpy (str, "\"\\p\"");
+  fast_json_parse_string (json, str);
+  if (fast_json_parser_error (json) != FAST_JSON_ESCAPE_CHARACTER_ERROR) {
+    fprintf (stderr, "escape character error expected: %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+
+  strcpy (str, "\"\001\"");
+  fast_json_parse_string (json, str);
+  if (fast_json_parser_error (json) != FAST_JSON_CONTROL_CHARACTER_ERROR) {
+    fprintf (stderr, "control character error expected: %s\n",
 	     fast_json_error_str (fast_json_parser_error (json)));
     exit (1);
   }
@@ -1628,11 +1716,11 @@ main (void)
 
 #ifndef WIN
   setlocale (LC_ALL, "nl_NL.UTF-8");
-  localeconv(); /* will normally be called in parser */
+  localeconv ();		/* will normally be called in parser */
 #if USE_FAST_CONVERT
   fast_dtoa (12.34, PREC_DBL_NR, str);
 #else
-  snprintf (str, sizeof(str), "%g", 12.34);
+  snprintf (str, sizeof (str), "%g", 12.34);
 #endif
   if (strchr (str, ',') == NULL) {
     fprintf (stderr, "Locale does not work '%s'\n", str);

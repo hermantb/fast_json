@@ -29,7 +29,7 @@ If you want to use this library in your project you can include the header file 
 ## RFC Conformance and some remarks.
 
  * The library is RFC 4627 (https://tools.ietf.org/html/rfc4627.html) compatible. Only UTF8 is implemented. So UTF-16LE, UTF-16BE, UTF-32LE or UTF-32BE are not implemented.
- * Strings are C-style strings with a null character at the end. All Unicoce charecter from U+0001 through U+10FFFF are allowed. So U+0000 is not implented.
+ * Strings are C-style strings with a null character at the end. All Unicoce charecter from U+0000 through U+10FFFF are allowed. The value U+0000 is stays always ad '\u0000' in strings and can not be used as '\0'.
  * Integer numbers are 64 bits signed. There is support for octal and hexadecimal numbers. If an integer number (number without '.' or 'e') does not fit in a 64 integer type a double is used. Integer values should be printed with 'FAST\_JSON\_FMT\_INT'.
  * Real numbers are 64 bits IEEE doubles. There is specical support for inf and nan and hex floating point.
  * The maximum nesting depth is tested for 10000 (See testcode). Perhaps larger values work. If you really need that much nesting you probably should redesign your json data. Also the stack size can be increaded with ulimit.

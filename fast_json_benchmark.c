@@ -94,7 +94,7 @@ get_time (void)
   struct timeval tv;
 
   gettimeofday (&tv, NULL);
-  return ((double)tv.tv_sec) *1e9 + ((double) tv.tv_usec) * 1e3;
+  return ((double) tv.tv_sec) * 1e9 + ((double) tv.tv_usec) * 1e3;
 #else
   struct timespec curtime;
 
@@ -158,6 +158,9 @@ main (int argc, char **argv)
     else if (strcmp (argv[i], "--nice") == 0) {
       nice = 1;
     }
+    else if (strcmp (argv[i], "--unicode_escape") == 0) {
+      options |= FAST_JSON_PRINT_UNICODE_ESCAPE;
+    }
     else if (name == NULL && argv[i][0] != '-') {
       name = argv[i];
     }
@@ -169,17 +172,18 @@ main (int argc, char **argv)
   if (print_help) {
     printf ("Usage: %s [options] [filename]\n", argv[0]);
     printf ("Options:\n");
-    printf ("--count=n      Run count times (default %u)\n", count);
-    printf ("--reuse=n      Use object reuse\n");
-    printf ("--print_time:  Run print time test\n");
-    printf ("--parse_time:  Run parse time test\n");
-    printf ("--hex:         Allow oct and hex numbers\n");
-    printf ("--infnan:      Allow inf and nan\n");
-    printf ("--big:         Use big allocs\n");
-    printf ("--check_alloc: Check allocs\n");
-    printf ("--fast_string: Use fast string parser\n");
-    printf ("--print:       Print result\n");
-    printf ("--nice:        Print result with spaces and newlines\n");
+    printf ("--count=n         Run count times (default %u)\n", count);
+    printf ("--reuse=n         Use object reuse\n");
+    printf ("--print_time:     Run print time test\n");
+    printf ("--parse_time:     Run parse time test\n");
+    printf ("--hex:            Allow oct and hex numbers\n");
+    printf ("--infnan:         Allow inf and nan\n");
+    printf ("--big:            Use big allocs\n");
+    printf ("--check_alloc:    Check allocs\n");
+    printf ("--fast_string:    Use fast string parser\n");
+    printf ("--print:          Print result\n");
+    printf ("--nice:           Print result with spaces and newlines\n");
+    printf ("--unicode_escape: Print unicode escape instead of utf8\n");
     exit (0);
   }
   if (print_time == 0 && parse_time == 0) {
@@ -271,7 +275,7 @@ main (int argc, char **argv)
     fast_json_release_print_value (json, s);
     s = fast_json_print_string (json, o, nice);
     fast_json_value_free (json, o);
-    printf ("%s\n", s);
+    printf ("%s", s);
     fast_json_release_print_value (json, s);
     fast_json_free (json);
     return 0;
@@ -299,7 +303,7 @@ main (int argc, char **argv)
       }
       if (o == NULL) {
 	printf ("Error: %s '%s' at %lu:%lu:%lu\n",
-		fast_json_error_str (fast_json_parser_error(json)),
+		fast_json_error_str (fast_json_parser_error (json)),
 		fast_json_parser_error_str (json),
 		(unsigned long) fast_json_parser_line (json),
 		(unsigned long) fast_json_parser_column (json),

@@ -5,14 +5,16 @@
 #define RAND_IA         __UINT64_C(0x5851F42D4C957F2D)
 #define RAND_IC         __UINT64_C(0x14057B7EF767814F)
 
-#define	SIZE		(28)
+#define	SIZE		(29)
+#define	NEST		(10)
 
 static FAST_JSON_DATA_TYPE add_null (FAST_JSON_TYPE json);
 static FAST_JSON_DATA_TYPE add_boolean (FAST_JSON_TYPE json, uint64_t * r);
 static FAST_JSON_DATA_TYPE add_integer (FAST_JSON_TYPE json, uint64_t * r);
 static FAST_JSON_DATA_TYPE add_double (FAST_JSON_TYPE json, uint64_t * r);
 static FAST_JSON_DATA_TYPE add_string (FAST_JSON_TYPE json, uint64_t * r);
-static FAST_JSON_DATA_TYPE add_object (FAST_JSON_TYPE json, uint64_t * r, int depth);
+static FAST_JSON_DATA_TYPE add_object (FAST_JSON_TYPE json, uint64_t * r,
+				       int depth);
 static FAST_JSON_DATA_TYPE add_array (FAST_JSON_TYPE json, uint64_t * r,
 				      int depth);
 
@@ -40,11 +42,14 @@ add_integer (FAST_JSON_TYPE json, uint64_t * r)
 static FAST_JSON_DATA_TYPE
 add_double (FAST_JSON_TYPE json, uint64_t * r)
 {
-  unsigned int exp;
+  int exp;
+
   *r = *r * RAND_IA + RAND_IC;
-  exp = (*r >> 10) % 100;
+  exp = (int) ((*r >> 10) % 100) - 50 - 32;
   *r = *r * RAND_IA + RAND_IC;
-  return fast_json_create_double_value (json, ldexp ((double) ((int64_t) *r), exp));
+  return fast_json_create_double_value (json,
+					ldexp ((double) ((int64_t) * r),
+					       exp));
 }
 
 static FAST_JSON_DATA_TYPE
@@ -57,40 +62,49 @@ add_string (FAST_JSON_TYPE json, uint64_t * r)
   n = ((*r >> 10) % (sizeof (str) - 5)) + 4;
   for (i = 0; i < n; i++) {
     *r = *r * RAND_IA + RAND_IC;
-    if (i < (sizeof (str) - 5) && ((*r >> 10) % 10) == 0) {
+    if (i < (sizeof (str) - 10) && ((*r >> 10) % 10) == 0) {
       unsigned int uc;
 
       do {
-        *r = *r * RAND_IA + RAND_IC;
-        uc = ((*r >> 10) % 0x10FFFFu) + 1;
-      } while (uc == '\\' || (uc >= 0xd800u && uc <= 0xdfffu));
-      if (uc < 0x80u) {
-	str[i+0] = uc;
+	*r = *r * RAND_IA + RAND_IC;
+	uc = (*r >> 10) % 0x110000u;
+      } while (uc == '\\' || (uc >= 0xD800u && uc <= 0xDFFFu));
+      if (uc < 0x20u) {
+	str[i + 0] = '\\';
+	str[i + 1] = 'u';
+	str[i + 2] = '0';
+	str[i + 3] = '0';
+	str[i + 4] = "0123456789ABCDEF"[(uc >> 4) & 0xFu];
+	str[i + 5] = "0123456789ABCDEF"[(uc >> 0) & 0xFu];
+	i += 5;
+      }
+      else if (uc < 0x80u) {
+	str[i + 0] = uc;
       }
       else if (uc < 0x800u) {
-        str[i+0] = ((uc >> 6) & 0x1Fu) | 0xC0u;
-        str[i+1] = ((uc >> 0) & 0x3Fu) | 0x80u;
+	str[i + 0] = ((uc >> 6) & 0x1Fu) | 0xC0u;
+	str[i + 1] = ((uc >> 0) & 0x3Fu) | 0x80u;
 	i += 1;
       }
       else if (uc < 0x10000u) {
-        str[i+0] = ((uc >> 12) & 0x0Fu) | 0xE0u;
-        str[i+1] = ((uc >> 6) & 0x3Fu) | 0x80u;
-        str[i+2] = ((uc >> 0) & 0x3Fu) | 0x80u;
+	str[i + 0] = ((uc >> 12) & 0x0Fu) | 0xE0u;
+	str[i + 1] = ((uc >> 6) & 0x3Fu) | 0x80u;
+	str[i + 2] = ((uc >> 0) & 0x3Fu) | 0x80u;
 	i += 2;
       }
       else if (uc <= 0x10FFFFu) {
-        str[i+0] = ((uc >> 18) & 0x07u) | 0xF0u;
-        str[i+1] = ((uc >> 12) & 0x3Fu) | 0x80u;
-        str[i+2] = ((uc >> 6) & 0x3Fu) | 0x80u;
-        str[i+3] = ((uc >> 0) & 0x3Fu) | 0x80u;
+	str[i + 0] = ((uc >> 18) & 0x07u) | 0xF0u;
+	str[i + 1] = ((uc >> 12) & 0x3Fu) | 0x80u;
+	str[i + 2] = ((uc >> 6) & 0x3Fu) | 0x80u;
+	str[i + 3] = ((uc >> 0) & 0x3Fu) | 0x80u;
 	i += 3;
       }
     }
     else {
       do {
-        *r = *r * RAND_IA + RAND_IC;
-        str[i] = ((*r >> 10) % 96) + 32;
-     } while (str[i] == '\\');
+	*r = *r * RAND_IA + RAND_IC;
+	str[i] = ((*r >> 10) % 96) + 32;
+      } while (str[i] == '\\' || str[i] == '"');
     }
   }
   str[i] = '\0';
@@ -100,7 +114,7 @@ add_string (FAST_JSON_TYPE json, uint64_t * r)
 static FAST_JSON_DATA_TYPE
 add_object (FAST_JSON_TYPE json, uint64_t * r, int depth)
 {
-  if (depth < 10) {
+  if (depth < NEST) {
     unsigned int i;
     unsigned int j;
     unsigned int n;
@@ -116,10 +130,10 @@ add_object (FAST_JSON_TYPE json, uint64_t * r, int depth)
 
       m = ((*r >> 10) % (sizeof (name) - 5)) + 4;
       for (j = 0; j < m; j++) {
-        do {
+	do {
 	  *r = *r * RAND_IA + RAND_IC;
 	  name[j] = ((*r >> 10) % 96) + 32;
-	} while (name[j] == '\\');
+	} while (name[j] == '\\' || name[j] == '"');
       }
       name[j] = '\0';
       *r = *r * RAND_IA + RAND_IC;
@@ -148,7 +162,7 @@ add_object (FAST_JSON_TYPE json, uint64_t * r, int depth)
 	break;
       }
       if (v) {
-        fast_json_add_object (json, o, name, v);
+	fast_json_add_object (json, o, name, v);
       }
     }
     return o;
@@ -159,7 +173,7 @@ add_object (FAST_JSON_TYPE json, uint64_t * r, int depth)
 static FAST_JSON_DATA_TYPE
 add_array (FAST_JSON_TYPE json, uint64_t * r, int depth)
 {
-  if (depth < 10) {
+  if (depth < NEST) {
     unsigned int i;
     unsigned int n;
     FAST_JSON_DATA_TYPE a;
@@ -196,7 +210,7 @@ add_array (FAST_JSON_TYPE json, uint64_t * r, int depth)
 	break;
       }
       if (v) {
-        fast_json_add_array (json, a, v);
+	fast_json_add_array (json, a, v);
       }
     }
     return a;
@@ -215,7 +229,7 @@ main (void)
   json = fast_json_create (NULL, NULL, NULL);
   fast_json_options (json, FAST_JSON_NO_CHECK_LOOP);
   a = add_array (json, &r, depth);
-  fast_json_print_file (json, a, stdout, 0);
+  fast_json_print_file (json, a, stdout, 1);
   fast_json_free (json);
   return 0;
 }

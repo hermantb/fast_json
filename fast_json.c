@@ -197,6 +197,7 @@ static FAST_JSON_ERROR_ENUM fast_json_skip_whitespace (FAST_JSON_TYPE json,
 static unsigned int fast_json_hex4 (FAST_JSON_TYPE json, const char **buf);
 static FAST_JSON_ERROR_ENUM fast_json_check_string (FAST_JSON_TYPE json,
 						    const char *save,
+						    const char *end,
 						    char *out);
 static FAST_JSON_DATA_TYPE fast_json_parse_value (FAST_JSON_TYPE json, int c);
 static FAST_JSON_DATA_TYPE fast_json_parse_all (FAST_JSON_TYPE json);
@@ -632,20 +633,18 @@ fast_json_hex4 (FAST_JSON_TYPE json, const char **buf)
       h += 10 + (*str) - 'a';
     }
     else {
-      fast_json_store_error (json, FAST_JSON_UNICODE_ERROR, *buf);
-      return 0;
+      fast_json_store_error (json, FAST_JSON_UNICODE_ESCAPE_ERROR, *buf);
+      return 0xFFFFFFFFu;
     }
     str++;
-  }
-  if (h == 0) {
-    fast_json_store_error (json, FAST_JSON_UNICODE_0_ERROR, *buf);
   }
   *buf = str;
   return h;
 }
 
 static FAST_JSON_ERROR_ENUM
-fast_json_check_string (FAST_JSON_TYPE json, const char *save, char *out)
+fast_json_check_string (FAST_JSON_TYPE json, const char *save,
+			const char *end, char *out)
 {
   const char *ptr;
   const char *save_ptr;
@@ -654,88 +653,104 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save, char *out)
 
   ptr = save;
   ptr2 = out;
-  while (*ptr && *ptr != '"') {
-    if (*ptr != '\\') {
-      if ((*ptr & 0x80u) != 0) {
-	unsigned char u = *ptr;
-	unsigned char size = 0;
-	unsigned int error = 1;
+  while (ptr < end) {
+    static const char special1[256] = {
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      0, 0, '"', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '\\', 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    };
+    if (special1[*ptr & 0xFFu] == 0) {
+      *ptr2++ = *ptr++;
+    }
+    else if ((*ptr & 0x80u) != 0) {
+      unsigned char u = *ptr;
+      unsigned char size = 0;
+      unsigned int error = 1;
 
-	switch (fast_json_utf8_size[u]) {
-	case 0:		/* FALLTHRU */
-	case 1:
-	  /* u >= 0x00u && u <= 0x7Fu not possible */
-	  /* u >= 0x80u && u <= 0xBFu should be size 2 */
-	  /* u >= 0xC0u && u <= 0xC1u remapped 0x00u..0x7Fu */
-	  /* u >= 0xF5u && u <= 0xFFu not valid */
-	  break;
-	case 2:
-	  if (ptr[1]) {
-	    unsigned char u1 = ptr[1];
+      switch (fast_json_utf8_size[u]) {
+      case 0:			/* FALLTHRU */
+      case 1:
+	/* u >= 0x00u && u <= 0x7Fu not possible */
+	/* u >= 0x80u && u <= 0xBFu should be size 2 */
+	/* u >= 0xC0u && u <= 0xC1u remapped 0x00u..0x7Fu */
+	/* u >= 0xF5u && u <= 0xFFu not valid */
+	break;
+      case 2:
+	if (ptr[1]) {
+	  unsigned char u1 = ptr[1];
 
-	    if (u1 >= 0x80u && u1 <= 0xBFu) {
-	      error = 0;
-	      size = 2;
-	      uc = ((u & 0x1Fu) << 6) | (u1 & 0x3Fu);
-	    }
+	  if (u1 >= 0x80u && u1 <= 0xBFu) {
+	    error = 0;
+	    size = 2;
+	    uc = ((u & 0x1Fu) << 6) | (u1 & 0x3Fu);
 	  }
-	  break;
-	case 3:
-	  if (ptr[1] && ptr[2]) {
-	    unsigned char u1 = ptr[1];
-	    unsigned char u2 = ptr[2];
+	}
+	break;
+      case 3:
+	if (ptr[1] && ptr[2]) {
+	  unsigned char u1 = ptr[1];
+	  unsigned char u2 = ptr[2];
 
-	    if (u1 >= 0x80u && u1 <= 0xBFu && u2 >= 0x80u && u2 <= 0xBFu) {
-	      error = 0;
-	      size = 3;
-	      uc = ((u & 0x0Fu) << 12) | ((u1 & 0x3Fu) << 6) | (u2 & 0x3Fu);
-	    }
+	  if (u1 >= 0x80u && u1 <= 0xBFu && u2 >= 0x80u && u2 <= 0xBFu) {
+	    error = 0;
+	    size = 3;
+	    uc = ((u & 0x0Fu) << 12) | ((u1 & 0x3Fu) << 6) | (u2 & 0x3Fu);
 	  }
-	  break;
-	case 4:
-	  if (ptr[1] && ptr[2] && ptr[3]) {
-	    unsigned char u1 = ptr[1];
-	    unsigned char u2 = ptr[2];
-	    unsigned char u3 = ptr[3];
+	}
+	break;
+      case 4:
+	if (ptr[1] && ptr[2] && ptr[3]) {
+	  unsigned char u1 = ptr[1];
+	  unsigned char u2 = ptr[2];
+	  unsigned char u3 = ptr[3];
 
-	    if (u1 >= 0x80u && u1 <= 0xBFu &&
-		u2 >= 0x80u && u2 <= 0xBFu && u3 >= 0x80u && u3 <= 0xBFu) {
-	      error = 0;
-	      size = 4;
-	      uc = ((u & 0x7u) << 18) | ((u1 & 0x3Fu) << 12) |
-		((u2 & 0x3Fu) << 6) | (u3 & 0x3Fu);
-	    }
+	  if (u1 >= 0x80u && u1 <= 0xBFu &&
+	      u2 >= 0x80u && u2 <= 0xBFu && u3 >= 0x80u && u3 <= 0xBFu) {
+	    error = 0;
+	    size = 4;
+	    uc = ((u & 0x7u) << 18) | ((u1 & 0x3Fu) << 12) |
+	      ((u2 & 0x3Fu) << 6) | (u3 & 0x3Fu);
 	  }
-	  break;
 	}
-	if (error == 0 &&
-	    (uc > 0x10FFFFu ||
-	     (uc >= 0xD800u && uc <= 0xDFFFu) ||
-	     (size == 2 && uc < 0x80u) ||
-	     (size == 3 && uc < 0x800u) || (size == 4 && uc < 0x10000u))) {
-	  error = 1;
-	}
-
-	if (error) {
-	  fast_json_store_error (json, FAST_JSON_UNICODE_ERROR, ptr);
-	  return FAST_JSON_UNICODE_ERROR;
-	}
-	while (size--) {
-	  *ptr2++ = *ptr++;
-	}
+	break;
       }
-      else {
+      if (error == 0 &&
+	  (uc > 0x10FFFFu ||
+	   (uc >= 0xD800u && uc <= 0xDFFFu) ||
+	   (size == 2 && uc < 0x80u) ||
+	   (size == 3 && uc < 0x800u) || (size == 4 && uc < 0x10000u))) {
+	error = 1;
+      }
+
+      if (error) {
+	fast_json_store_error (json, FAST_JSON_UTF8_ERROR, ptr);
+	return FAST_JSON_UTF8_ERROR;
+      }
+      while (size--) {
 	*ptr2++ = *ptr++;
       }
     }
-    else {
-      static const char special[256] = {
+    else if (*ptr == '\\') {
+      static const char special2[256] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, '"', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '/',
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '/',
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '\\', 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, '\b', 0, 0, 0, '\f', 0, 0, 0, 0, 0, 0, 0, '\n', 0,
 	0, 0, '\r', 0, '\t', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -748,13 +763,14 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save, char *out)
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
       };
       ptr++;
-      if (special[*ptr & 0xFFu]) {
-	*ptr2++ = special[*ptr++ & 0xFFu];
+      if (special2[*ptr & 0xFFu]) {
+	*ptr2++ = special2[*ptr++ & 0xFFu];
       }
-      else if (*ptr++ == 'u') {
-	save_ptr = ptr - 2;
+      else if (*ptr == 'u') {
+	save_ptr = ptr - 1;
+	ptr++;
 	uc = fast_json_hex4 (json, &ptr);
-	if (uc == 0) {
+	if (uc == 0xFFFFFFFFu) {
 	  return json->error;
 	}
 	if (uc >= 0xD800u && uc <= 0xDBFFu) {
@@ -763,7 +779,7 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save, char *out)
 	    ptr += 2;
 
 	    uc2 = fast_json_hex4 (json, &ptr);
-	    if (uc2 == 0) {
+	    if (uc2 == 0xFFFFFFFFu) {
 	      return json->error;
 	    }
 	    if (uc2 >= 0xDC00u && uc2 <= 0xDFFFu) {
@@ -784,7 +800,20 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save, char *out)
 	  return FAST_JSON_UNICODE_ERROR;
 	}
 	if (uc < 0x80u) {
-	  *ptr2++ = uc;
+	  if (uc == 0) {
+	    *ptr2++ = '\\';
+	    *ptr2++ = 'u';
+	    *ptr2++ = '0';
+	    *ptr2++ = '0';
+	    *ptr2++ = '0';
+	    *ptr2++ = '0';
+	  }
+	  else {
+	    if (uc == '\\' || uc == '"') {
+	      *ptr2++ = '\\';
+	    }
+	    *ptr2++ = uc;
+	  }
 	}
 	else if (uc < 0x800u) {
 	  *ptr2++ = ((uc >> 6) & 0x1Fu) | 0xC0u;
@@ -802,14 +831,27 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save, char *out)
 	  *ptr2++ = ((uc >> 0) & 0x3Fu) | 0x80u;
 	}
 	else {
+	  /* Not possible */
 	  fast_json_store_error (json, FAST_JSON_UNICODE_ERROR, save_ptr);
 	  return FAST_JSON_UNICODE_ERROR;
 	}
       }
-      else {
-	fast_json_store_error (json, FAST_JSON_UNICODE_ERROR, &ptr[-1]);
-	return FAST_JSON_UNICODE_ERROR;
+      else if (*ptr == '\\' || *ptr == '"') {
+	*ptr2++ = '\\';
+	*ptr2++ = *ptr++;
       }
+      else {
+	fast_json_store_error (json, FAST_JSON_ESCAPE_CHARACTER_ERROR, ptr);
+	return FAST_JSON_ESCAPE_CHARACTER_ERROR;
+      }
+    }
+    else if (*ptr == '"') {
+      fast_json_store_error (json, FAST_JSON_ESCAPE_CHARACTER_ERROR, ptr);
+      return FAST_JSON_CONTROL_CHARACTER_ERROR;
+    }
+    else {
+      fast_json_store_error (json, FAST_JSON_CONTROL_CHARACTER_ERROR, ptr);
+      return FAST_JSON_CONTROL_CHARACTER_ERROR;
     }
   }
   *ptr2 = 0;
@@ -853,7 +895,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       v = fast_json_create_double_value (json, fast_json_nan (0));
     }
     else {
-      fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
+      fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
       return NULL;
     }
     break;
@@ -895,7 +937,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       v = fast_json_create_double_value (json, fast_json_inf (0));
     }
     else {
-      fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
+      fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
       return NULL;
     }
     break;
@@ -920,7 +962,8 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	  return NULL;
 	}
       }
-      if (fast_json_check_string (json, save, out) != FAST_JSON_OK) {
+      if (fast_json_check_string (json, save, save + json->n_save, out) !=
+	  FAST_JSON_OK) {
 	if (out != &str[0]) {
 	  (*json->my_free) (out);
 	}
@@ -1195,7 +1238,8 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	  return NULL;
 	}
       }
-      if (fast_json_check_string (json, save, out) != FAST_JSON_OK) {
+      if (fast_json_check_string (json, save, save + json->n_save, out) !=
+	  FAST_JSON_OK) {
 	if (out != &name[0]) {
 	  (*json->my_free) (out);
 	}
@@ -1387,10 +1431,16 @@ fast_json_error_str (FAST_JSON_ERROR_ENUM error)
     return ("Comment error");
   case FAST_JSON_NUMBER_ERROR:
     return ("Number error");
+  case FAST_JSON_CONTROL_CHARACTER_ERROR:
+    return ("Control character error");
+  case FAST_JSON_ESCAPE_CHARACTER_ERROR:
+    return ("Escape character error");
+  case FAST_JSON_UTF8_ERROR:
+    return ("UTF8 character error");
   case FAST_JSON_UNICODE_ERROR:
     return ("Unicode error");
-  case FAST_JSON_UNICODE_0_ERROR:
-    return ("Unicode 0 error");
+  case FAST_JSON_UNICODE_ESCAPE_ERROR:
+    return ("Unicode escape error");
   case FAST_JSON_STRING_START_ERROR:
     return ("String start error");
   case FAST_JSON_STRING_END_ERROR:
@@ -1409,6 +1459,8 @@ fast_json_error_str (FAST_JSON_ERROR_ENUM error)
     return ("No data error");
   case FAST_JSON_INDEX_ERROR:
     return ("Index error");
+  case FAST_JSON_LOOP_ERROR:
+    return ("Loop error");
   }
   return NULL;
 }
@@ -1664,7 +1716,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       v = fast_json_create_double_value (json, fast_json_nan (0));
     }
     else {
-      fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, value, ":,]}");
+      fast_json_store_error2 (json, FAST_JSON_VALUE_ERROR, value, ":,]}");
       return NULL;
     }
     break;
@@ -1699,7 +1751,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       v = fast_json_create_double_value (json, fast_json_inf (0));
     }
     else {
-      fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, value, ":,]}");
+      fast_json_store_error2 (json, FAST_JSON_VALUE_ERROR, value, ":,]}");
       return NULL;
     }
     break;
@@ -1724,7 +1776,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	  return NULL;
 	}
       }
-      if (fast_json_check_string (json, save, out) != FAST_JSON_OK) {
+      if (fast_json_check_string (json, save, value, out) != FAST_JSON_OK) {
 	fast_json_store_error2 (json, json->error, save, ":,]}");
 	if (out != &str[0]) {
 	  (*json->my_free) (out);
@@ -2045,7 +2097,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	    return NULL;
 	  }
 	}
-	if (fast_json_check_string (json, save, out) != FAST_JSON_OK) {
+	if (fast_json_check_string (json, save, value, out) != FAST_JSON_OK) {
 	  fast_json_store_error2 (json, json->error, save, ":,]}");
 	  if (out != &name[0]) {
 	    (*json->my_free) (out);
@@ -2526,12 +2578,12 @@ fast_json_print_string_value (FAST_JSON_TYPE json, const char *s)
 
     while (*s) {
       static const char special[256] = {
-	0, 0, 0, 0, 0, 0, 0, 0, 'b', 't', 'n', 0, 'f', 'r', 0, 0,
+	1, 1, 1, 1, 1, 1, 1, 1, 'b', 't', 'n', 1, 'f', 'r', 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '/',
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, '"', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '/',
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '\\', 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -2545,6 +2597,10 @@ fast_json_print_string_value (FAST_JSON_TYPE json, const char *s)
       };
 
       if (special[*s & 0xFFu]) {
+	static const char hex[16] = {
+	  '0', '1', '2', '3', '4', '5', '6', '7',
+	  '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
+	};
 	char v[12];
 	unsigned int size;
 
@@ -2555,78 +2611,122 @@ fast_json_print_string_value (FAST_JSON_TYPE json, const char *s)
 	  last = NULL;
 	}
 	if ((*s & 0x80u) != 0) {
-	  static const char hex[16] = {
-	    '0', '1', '2', '3', '4', '5', '6', '7',
-	    '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
-	  };
-	  unsigned char u = (unsigned char) *s;
-	  unsigned int uc;
-
 	  size = 0;
-	  switch (fast_json_utf8_size[u]) {
-	  case 0:		/* FALLTHRU */
-	  case 1:
-	    /* Should never happen */
-	    break;
-	  case 2:
-	    if (s[1]) {
-	      uc = ((s[0] & 0x1Fu) << 6) | (s[1] & 0x3Fu);
-	      v[0] = '\\';
-	      v[1] = 'u';
-	      v[2] = hex[(uc >> 12) & 0xFu];
-	      v[3] = hex[(uc >> 8) & 0xFu];
-	      v[4] = hex[(uc >> 4) & 0xFu];
-	      v[5] = hex[(uc >> 0) & 0xFu];
-	      size = 6;
-	      s += 2;
-	    }
-	    break;
-	  case 3:
-	    if (s[1] && s[2]) {
-	      uc =
-		((s[0] & 0x0Fu) << 12) | ((s[1] & 0x3Fu) << 6) | (s[2] &
-								  0x3Fu);
-	      v[0] = '\\';
-	      v[1] = 'u';
-	      v[2] = hex[(uc >> 12) & 0xFu];
-	      v[3] = hex[(uc >> 8) & 0xFu];
-	      v[4] = hex[(uc >> 4) & 0xFu];
-	      v[5] = hex[(uc >> 0) & 0xFu];
-	      size = 6;
-	      s += 3;
-	    }
-	    break;
-	  case 4:
-	    if (s[1] && s[2] && s[3]) {
-	      unsigned int n;
+	  if (json->options & FAST_JSON_PRINT_UNICODE_ESCAPE) {
+	    unsigned char u = (unsigned char) *s;
+	    unsigned int uc;
 
-	      uc = ((s[0] & 0x7u) << 18) | ((s[1] & 0x3Fu) << 12) |
-		((s[2] & 0x3Fu) << 6) | (s[3] & 0x3Fu);
-	      uc -= 0x10000u;
-	      n = ((uc >> 10) & 0x3FFu) + 0xD800u;
-	      v[0] = '\\';
-	      v[1] = 'u';
-	      v[2] = hex[(n >> 12) & 0xFu];
-	      v[3] = hex[(n >> 8) & 0xFu];
-	      v[4] = hex[(n >> 4) & 0xFu];
-	      v[5] = hex[(n >> 0) & 0xFu];
-	      n = (uc & 0x3FFu) + 0xDC00u;
-	      v[6] = '\\';
-	      v[7] = 'u';
-	      v[8] = hex[(n >> 12) & 0xFu];
-	      v[9] = hex[(n >> 8) & 0xFu];
-	      v[10] = hex[(n >> 4) & 0xFu];
-	      v[11] = hex[(n >> 0) & 0xFu];
-	      size = 12;
-	      s += 4;
+	    switch (fast_json_utf8_size[u]) {
+	    case 0:		/* FALLTHRU */
+	    case 1:
+	      /* Should never happen */
+	      break;
+	    case 2:
+	      if (s[1]) {
+		uc = ((s[0] & 0x1Fu) << 6) | (s[1] & 0x3Fu);
+		v[0] = '\\';
+		v[1] = 'u';
+		v[2] = hex[(uc >> 12) & 0xFu];
+		v[3] = hex[(uc >> 8) & 0xFu];
+		v[4] = hex[(uc >> 4) & 0xFu];
+		v[5] = hex[(uc >> 0) & 0xFu];
+		size = 6;
+		s += 2;
+	      }
+	      break;
+	    case 3:
+	      if (s[1] && s[2]) {
+		uc =
+		  ((s[0] & 0x0Fu) << 12) | ((s[1] & 0x3Fu) << 6) | (s[2] &
+								    0x3Fu);
+		v[0] = '\\';
+		v[1] = 'u';
+		v[2] = hex[(uc >> 12) & 0xFu];
+		v[3] = hex[(uc >> 8) & 0xFu];
+		v[4] = hex[(uc >> 4) & 0xFu];
+		v[5] = hex[(uc >> 0) & 0xFu];
+		size = 6;
+		s += 3;
+	      }
+	      break;
+	    case 4:
+	      if (s[1] && s[2] && s[3]) {
+		unsigned int n;
+
+		uc = ((s[0] & 0x7u) << 18) | ((s[1] & 0x3Fu) << 12) |
+		  ((s[2] & 0x3Fu) << 6) | (s[3] & 0x3Fu);
+		uc -= 0x10000u;
+		n = ((uc >> 10) & 0x3FFu) + 0xD800u;
+		v[0] = '\\';
+		v[1] = 'u';
+		v[2] = hex[(n >> 12) & 0xFu];
+		v[3] = hex[(n >> 8) & 0xFu];
+		v[4] = hex[(n >> 4) & 0xFu];
+		v[5] = hex[(n >> 0) & 0xFu];
+		n = (uc & 0x3FFu) + 0xDC00u;
+		v[6] = '\\';
+		v[7] = 'u';
+		v[8] = hex[(n >> 12) & 0xFu];
+		v[9] = hex[(n >> 8) & 0xFu];
+		v[10] = hex[(n >> 4) & 0xFu];
+		v[11] = hex[(n >> 0) & 0xFu];
+		size = 12;
+		s += 4;
+	      }
+	      break;
 	    }
-	    break;
+	  }
+	  else {
+	    switch (fast_json_utf8_size[*s & 0xFFu]) {
+	    case 0:		/* FALLTHRU */
+	    case 1:
+	      /* Should never happen */
+	      break;
+	    case 2:
+	      if (s[1]) {
+		v[0] = s[0];
+		v[1] = s[1];
+		size = 2;
+		s += 2;
+	      }
+	      break;
+	    case 3:
+	      if (s[1] && s[2]) {
+		v[0] = s[0];
+		v[1] = s[1];
+		v[2] = s[2];
+		size = 3;
+		s += 3;
+	      }
+	      break;
+	    case 4:
+	      if (s[1] && s[2] && s[3]) {
+		v[0] = s[0];
+		v[1] = s[1];
+		v[2] = s[2];
+		v[3] = s[3];
+		size = 4;
+		s += 4;
+	      }
+	      break;
+	    }
 	  }
 	  if (size == 0) {
 	    /* Should never happen */
 	    v[0] = *s++;
 	    size = 1;
 	  }
+	}
+	else if (special[*s & 0xFFu] == 1) {
+	  unsigned char u = (unsigned char) *s++;
+
+	  v[0] = '\\';
+	  v[1] = 'u';
+	  v[2] = hex[(u >> 12) & 0xFu];
+	  v[3] = hex[(u >> 8) & 0xFu];
+	  v[4] = hex[(u >> 4) & 0xFu];
+	  v[5] = hex[(u >> 0) & 0xFu];
+	  size = 6;
 	}
 	else {
 	  v[0] = '\\';
@@ -3060,7 +3160,8 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
       strcpy (str, value);
     }
     if (new_value) {
-      if (fast_json_check_string (json, value, new_value) == FAST_JSON_OK) {
+      if (fast_json_check_string (json, value, value + len, new_value) ==
+	  FAST_JSON_OK) {
 	item = fast_json_data_create (json);
 	if (item) {
 	  item->type = FAST_JSON_STRING;
@@ -3323,12 +3424,16 @@ fast_json_add_array (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
 {
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_MALLOC_ERROR;
 
-  if (json && array && array->type == FAST_JSON_ARRAY && value &&
-      ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
-       array->used == 0 || value->used == 0 ||
-       (fast_json_check_loop (array, value) == 0 &&
-	fast_json_check_loop (value, array) == 0))) {
-    retval = fast_json_add_array_end (json, array, value);
+  if (json && array && array->type == FAST_JSON_ARRAY && value) {
+    if ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
+	array->used == 0 || value->used == 0 ||
+	(fast_json_check_loop (array, value) == 0 &&
+	 fast_json_check_loop (value, array) == 0)) {
+      retval = fast_json_add_array_end (json, array, value);
+    }
+    else {
+      retval = FAST_JSON_LOOP_ERROR;
+    }
   }
   return retval;
 }
@@ -3397,12 +3502,16 @@ fast_json_add_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
 {
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_MALLOC_ERROR;
 
-  if (json && object && object->type == FAST_JSON_OBJECT && name && value &&
-      ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
-       object->used == 0 || value->used == 0 ||
-       (fast_json_check_loop (object, value) == 0 &&
-	fast_json_check_loop (value, object) == 0))) {
-    retval = fast_json_add_object_end (json, object, name, value);
+  if (json && object && object->type == FAST_JSON_OBJECT && name && value) {
+    if ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
+	object->used == 0 || value->used == 0 ||
+	(fast_json_check_loop (object, value) == 0 &&
+	 fast_json_check_loop (value, object) == 0)) {
+      retval = fast_json_add_object_end (json, object, name, value);
+    }
+    else {
+      retval = FAST_JSON_LOOP_ERROR;
+    }
   }
   return retval;
 }
@@ -3414,16 +3523,20 @@ fast_json_patch_array (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_INDEX_ERROR;
 
   if (json && array && array->type == FAST_JSON_ARRAY && value &&
-      array->u.array && index < array->u.array->len &&
-      ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
-       array->used == 0 || value->used == 0 ||
-       (fast_json_check_loop (array, value) == 0 &&
-	fast_json_check_loop (value, array) == 0))) {
-    array->used = 1;
-    value->used = 1;
-    fast_json_value_free (json, array->u.array->values[index]);
-    array->u.array->values[index] = value;
-    retval = FAST_JSON_OK;
+      array->u.array && index < array->u.array->len) {
+    if ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
+	array->used == 0 || value->used == 0 ||
+	(fast_json_check_loop (array, value) == 0 &&
+	 fast_json_check_loop (value, array) == 0)) {
+      array->used = 1;
+      value->used = 1;
+      fast_json_value_free (json, array->u.array->values[index]);
+      array->u.array->values[index] = value;
+      retval = FAST_JSON_OK;
+    }
+    else {
+      retval = FAST_JSON_LOOP_ERROR;
+    }
   }
   return retval;
 }
@@ -3435,22 +3548,26 @@ fast_json_insert_array (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_INDEX_ERROR;
 
   if (json && array && array->type == FAST_JSON_ARRAY && value &&
-      array->u.array && index < array->u.array->len &&
-      ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
-       array->used == 0 || value->used == 0 ||
-       (fast_json_check_loop (array, value) == 0 &&
-	fast_json_check_loop (value, array) == 0))) {
-    retval = fast_json_add_array_end (json, array, value);
-    if (retval == FAST_JSON_OK) {
-      size_t i;
-      FAST_JSON_DATA_TYPE *value_array = array->u.array->values;
+      array->u.array && index < array->u.array->len) {
+    if ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
+	array->used == 0 || value->used == 0 ||
+	(fast_json_check_loop (array, value) == 0 &&
+	 fast_json_check_loop (value, array) == 0)) {
+      retval = fast_json_add_array_end (json, array, value);
+      if (retval == FAST_JSON_OK) {
+	size_t i;
+	FAST_JSON_DATA_TYPE *value_array = array->u.array->values;
 
-      array->used = 1;
-      value->used = 1;
-      for (i = array->u.array->len - 1; i > index; i--) {
-	value_array[i] = value_array[i - 1];
+	array->used = 1;
+	value->used = 1;
+	for (i = array->u.array->len - 1; i > index; i--) {
+	  value_array[i] = value_array[i - 1];
+	}
+	value_array[index] = value;
       }
-      value_array[index] = value;
+    }
+    else {
+      retval = FAST_JSON_LOOP_ERROR;
     }
   }
   return retval;
@@ -3484,16 +3601,20 @@ fast_json_patch_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_INDEX_ERROR;
 
   if (json && object && object->type == FAST_JSON_OBJECT && value &&
-      object->u.object && index < object->u.object->len &&
-      ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
-       object->used == 0 || value->used == 0 ||
-       (fast_json_check_loop (object, value) == 0 &&
-	fast_json_check_loop (value, object) == 0))) {
-    object->used = 1;
-    value->used = 1;
-    fast_json_value_free (json, object->u.object->data[index].value);
-    object->u.object->data[index].value = value;
-    retval = FAST_JSON_OK;
+      object->u.object && index < object->u.object->len) {
+    if (((json->options & FAST_JSON_NO_CHECK_LOOP) ||
+	 object->used == 0 || value->used == 0 ||
+	 (fast_json_check_loop (object, value) == 0 &&
+	  fast_json_check_loop (value, object) == 0))) {
+      object->used = 1;
+      value->used = 1;
+      fast_json_value_free (json, object->u.object->data[index].value);
+      object->u.object->data[index].value = value;
+      retval = FAST_JSON_OK;
+    }
+    else {
+      retval = FAST_JSON_LOOP_ERROR;
+    }
   }
   return retval;
 }
@@ -3506,24 +3627,28 @@ fast_json_insert_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_INDEX_ERROR;
 
   if (json && object && object->type == FAST_JSON_OBJECT && name && value &&
-      object->u.object && index < object->u.object->len &&
-      ((json->options & FAST_JSON_NO_CHECK_LOOP) ||
-       object->used == 0 || value->used == 0 ||
-       (fast_json_check_loop (object, value) == 0 &&
-	fast_json_check_loop (value, object) == 0))) {
-    retval = fast_json_add_object_end (json, object, name, value);
-    if (retval == FAST_JSON_OK) {
-      size_t i;
-      FAST_JSON_NAME_VALUE_TYPE *data = object->u.object->data;
-      char *save_name = data[object->u.object->len - 1].name;
+      object->u.object && index < object->u.object->len) {
+    if (((json->options & FAST_JSON_NO_CHECK_LOOP) ||
+	 object->used == 0 || value->used == 0 ||
+	 (fast_json_check_loop (object, value) == 0 &&
+	  fast_json_check_loop (value, object) == 0))) {
+      retval = fast_json_add_object_end (json, object, name, value);
+      if (retval == FAST_JSON_OK) {
+	size_t i;
+	FAST_JSON_NAME_VALUE_TYPE *data = object->u.object->data;
+	char *save_name = data[object->u.object->len - 1].name;
 
-      object->used = 1;
-      value->used = 1;
-      for (i = object->u.object->len - 1; i > index; i--) {
-	data[i] = data[i - 1];
+	object->used = 1;
+	value->used = 1;
+	for (i = object->u.object->len - 1; i > index; i--) {
+	  data[i] = data[i - 1];
+	}
+	data[index].name = save_name;
+	data[index].value = value;
       }
-      data[index].name = save_name;
-      data[index].value = value;
+    }
+    else {
+      retval = FAST_JSON_LOOP_ERROR;
     }
   }
   return retval;
@@ -3692,7 +3817,8 @@ fast_json_set_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE data,
       new_value = strcpy (str, value);
     }
     if (new_value) {
-      if (fast_json_check_string (json, value, new_value) == FAST_JSON_OK) {
+      if (fast_json_check_string (json, value, value + len, new_value) ==
+	  FAST_JSON_OK) {
 	if (data->is_str == 0) {
 	  (*json->my_free) (data->u.string_value);
 	}
@@ -3864,8 +3990,8 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       fast_json_update_crc (crc, save);
     }
     else {
-      fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
-      return FAST_JSON_NUMBER_ERROR;
+      fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
+      return FAST_JSON_VALUE_ERROR;
     }
     break;
   case 'f':
@@ -3906,8 +4032,8 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       fast_json_update_crc (crc, save);
     }
     else {
-      fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
-      return FAST_JSON_NUMBER_ERROR;
+      fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
+      return FAST_JSON_VALUE_ERROR;
     }
     break;
   case '"':

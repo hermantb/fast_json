@@ -150,6 +150,9 @@ extern "C"
 /** Use bigger allocs for objects */
 #define	FAST_JSON_BIG_ALLOC		(0x40)
 
+/** Print unicode escape characters instead of UTF8 */
+#define	FAST_JSON_PRINT_UNICODE_ESCAPE	(0x80)
+
 /** Json value type */
   typedef enum fast_json_value_enum
   {
@@ -169,8 +172,11 @@ extern "C"
     FAST_JSON_MALLOC_ERROR,
     FAST_JSON_COMMENT_ERROR,
     FAST_JSON_NUMBER_ERROR,
+    FAST_JSON_CONTROL_CHARACTER_ERROR,
+    FAST_JSON_ESCAPE_CHARACTER_ERROR,
+    FAST_JSON_UTF8_ERROR,
     FAST_JSON_UNICODE_ERROR,
-    FAST_JSON_UNICODE_0_ERROR,
+    FAST_JSON_UNICODE_ESCAPE_ERROR,
     FAST_JSON_STRING_START_ERROR,
     FAST_JSON_STRING_END_ERROR,
     FAST_JSON_VALUE_ERROR,
@@ -179,7 +185,8 @@ extern "C"
     FAST_JSON_OBJECT_END_ERROR,
     FAST_JSON_PARSE_ERROR,
     FAST_JSON_NO_DATA_ERROR,
-    FAST_JSON_INDEX_ERROR
+    FAST_JSON_INDEX_ERROR,
+    FAST_JSON_LOOP_ERROR
   } FAST_JSON_ERROR_ENUM;
 
 /** Json data type. All values are returned in this type. */
@@ -719,8 +726,7 @@ extern "C"
 						     FAST_JSON_DATA_TYPE
 						     array,
 						     FAST_JSON_DATA_TYPE
-						     value,
-						     size_t index);
+						     value, size_t index);
 /**
  * \b Description
  *
@@ -736,8 +742,7 @@ extern "C"
 						      FAST_JSON_DATA_TYPE
 						      array,
 						      FAST_JSON_DATA_TYPE
-						      value,
-						      size_t index);
+						      value, size_t index);
 
 /**
  * \b Description
@@ -751,8 +756,7 @@ extern "C"
  */
   extern FAST_JSON_ERROR_ENUM fast_json_remove_array (FAST_JSON_TYPE json,
 						      FAST_JSON_DATA_TYPE
-						      array,
-						      size_t index);
+						      array, size_t index);
 
 /**
  * \b Description
@@ -769,8 +773,7 @@ extern "C"
 						      FAST_JSON_DATA_TYPE
 						      object,
 						      FAST_JSON_DATA_TYPE
-						      value,
-						      size_t index);
+						      value, size_t index);
 
 /**
  * \b Description
@@ -789,8 +792,7 @@ extern "C"
 						       object,
 						       const char *name,
 						       FAST_JSON_DATA_TYPE
-						       value,
-						       size_t index);
+						       value, size_t index);
 
 /**
  * \b Description
@@ -804,8 +806,7 @@ extern "C"
  */
   extern FAST_JSON_ERROR_ENUM fast_json_remove_object (FAST_JSON_TYPE json,
 						       FAST_JSON_DATA_TYPE
-						       object,
-						       size_t index);
+						       object, size_t index);
 
 /**
  * \b Description
@@ -837,8 +838,7 @@ extern "C"
  * \return Json data at index.
  */
   extern FAST_JSON_DATA_TYPE fast_json_get_array_data (FAST_JSON_DATA_TYPE
-						       data,
-						       size_t index);
+						       data, size_t index);
 
 /**
  * \b Description
@@ -871,8 +871,7 @@ extern "C"
  * \return Json data at index.
  */
   extern FAST_JSON_DATA_TYPE fast_json_get_object_data (FAST_JSON_DATA_TYPE
-							data,
-							size_t index);
+							data, size_t index);
 /**
  * \b Description
  *
