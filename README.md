@@ -29,9 +29,9 @@ If you want to use this library in your project you can include the header file 
 ## RFC Conformance and some remarks.
 
  * The library is RFC 4627 (https://tools.ietf.org/html/rfc4627.html) compatible. Only UTF8 is implemented. So UTF-16LE, UTF-16BE, UTF-32LE or UTF-32BE are not implemented.
- * Strings are C-style strings with a null character at the end. All Unicoce charecter from U+0000 through U+10FFFF are allowed. The value U+0000 is stays always ad '\u0000' in strings and can not be used as '\0'.
+ * Strings are C-style strings with a null character at the end. All Unicode charecter from U+0000 through U+10FFFF are allowed. The value U+0000 stays always as "\u0000" in strings and can not be used as '\0'.
  * Integer numbers are 64 bits signed. There is support for octal and hexadecimal numbers. If an integer number (number without '.' or 'e') does not fit in a 64 integer type a double is used. Integer values should be printed with 'FAST\_JSON\_FMT\_INT'.
- * Real numbers are 64 bits IEEE doubles. There is specical support for inf and nan and hex floating point.
+ * Real numbers are 64 bits IEEE doubles. There is special support for inf and nan and hex floating point.
  * The maximum nesting depth is tested for 10000 (See testcode). Perhaps larger values work. If you really need that much nesting you probably should redesign your json data. Also the stack size can be increaded with ulimit.
  * Objects will never be sorted. Order of object keys is always preserved.
 
@@ -46,6 +46,8 @@ There are several special options with this library.
  * FAST_JSON_SORT_OBJECTS		Sort object names during printing.
  * FAST_JSON_NO_EOF_CHECK		Disable the eof check. This allows multiple calls to parser to parse larger values. See testcode how this works.
  * FAST_JSON_BIG_ALLOC			Use big malloc's for json objects. This may require more memory but is faster.
+ * FAST_JSON_PRINT_UNICODE_ESCAPE	Print unicode escape characters instead of UTF8.
+ * FAST_JSON_NO_DUPLICATE_CHECK		Do not reject duplicate object names.
 
 ## API Documentation.
 
@@ -59,6 +61,30 @@ So if you want to share data in different threads you have to do your own lockin
 ## Memory allocation functions.
 
 During creating of the main json data pointer you can specify your own alloc routines. See the benchmark and test code for an example.
+
+## Benchmark
+
+The benchmark options are: (Use ./fast_json_benchmark --help):
+
+<pre>
+Usage: ./fast_json_benchmark [options] [filename]
+Options:
+--count=n         Run count times (default 1000)
+--reuse=n         Use object reuse
+--print_time:     Run print time test
+--parse_time:     Run parse time test
+--hex:            Allow oct and hex numbers
+--infnan:         Allow inf and nan
+--big:            Use big allocs
+--no_duplicate:   Do not check duplicate object names
+--check_alloc:    Check allocs
+--fast_string:    Use fast string parser
+--print:          Print result
+--nice:           Print result with spaces and newlines
+--unicode_escape: Print unicode escape instead of utf8
+</pre>
+
+Default there is a simple internal test. Normally you supply a file to run the benchmark. If you do not supply --print_time or --parse_time both are run.
 
 ## License
 

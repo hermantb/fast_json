@@ -146,6 +146,9 @@ main (int argc, char **argv)
     else if (strcmp (argv[i], "--big") == 0) {
       options |= FAST_JSON_BIG_ALLOC;
     }
+    else if (strcmp (argv[i], "--no_duplicate") == 0) {
+      options |= FAST_JSON_NO_DUPLICATE_CHECK;
+    }
     else if (strcmp (argv[i], "--check_alloc") == 0) {
       check_alloc = 1;
     }
@@ -179,6 +182,7 @@ main (int argc, char **argv)
     printf ("--hex:            Allow oct and hex numbers\n");
     printf ("--infnan:         Allow inf and nan\n");
     printf ("--big:            Use big allocs\n");
+    printf ("--no_duplicate:   Do not check duplicate object names\n");
     printf ("--check_alloc:    Check allocs\n");
     printf ("--fast_string:    Use fast string parser\n");
     printf ("--print:          Print result\n");

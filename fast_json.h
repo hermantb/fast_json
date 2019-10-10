@@ -130,28 +130,31 @@ extern "C"
 #define	FAST_JSON_FMT_INT	PRId64
 
 /** Do not check for loops */
-#define	FAST_JSON_NO_CHECK_LOOP		(0x01)
+#define	FAST_JSON_NO_CHECK_LOOP		(0x001)
 
 /** During parsing convert all number to doubles */
-#define	FAST_JSON_PARSE_INT_AS_DOUBLE	(0x02)
+#define	FAST_JSON_PARSE_INT_AS_DOUBLE	(0x002)
 
 /** Allow (+)/(-)inf(inity) and (+)/(-)nan([a-z][0-9]_) and (+)number */
-#define	FAST_JSON_INF_NAN		(0x04)
+#define	FAST_JSON_INF_NAN		(0x004)
 
 /** Allow octal and hex integer numbers and hex floating point numbers */
-#define	FAST_JSON_ALLOW_OCT_HEX		(0x08)
+#define	FAST_JSON_ALLOW_OCT_HEX		(0x008)
 
 /** Sort object names when printing */
-#define	FAST_JSON_SORT_OBJECTS		(0x10)
+#define	FAST_JSON_SORT_OBJECTS		(0x010)
 
 /** Do not check for eof (allows multiple data) */
-#define	FAST_JSON_NO_EOF_CHECK		(0x20)
+#define	FAST_JSON_NO_EOF_CHECK		(0x020)
 
 /** Use bigger allocs for objects */
-#define	FAST_JSON_BIG_ALLOC		(0x40)
+#define	FAST_JSON_BIG_ALLOC		(0x040)
 
 /** Print unicode escape characters instead of UTF8 */
-#define	FAST_JSON_PRINT_UNICODE_ESCAPE	(0x80)
+#define	FAST_JSON_PRINT_UNICODE_ESCAPE	(0x080)
+
+/** Do not reject duplicate object names */
+#define	FAST_JSON_NO_DUPLICATE_CHECK	(0x100)
 
 /** Json value type */
   typedef enum fast_json_value_enum
@@ -247,6 +250,8 @@ extern "C"
  * \see FAST_JSON_SORT_OBJECTS
  * \see FAST_JSON_NO_EOF_CHECK
  * \see FAST_JSON_BIG_ALLOC
+ * \see FAST_JSON_PRINT_UNICODE_ESCAPE
+ * \see FAST_JSON_NO_DUPLICATE_CHECK
  *
  * \param json Json object from \ref fast_json_create.
  * \param value Parse options.
