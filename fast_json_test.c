@@ -110,6 +110,43 @@ tst_error (const char *error, const char *expected)
   }
 }
 
+typedef struct
+{
+  unsigned int pos;
+  const char *str;
+} getc_user_data;
+
+static int
+user_getc (void *user_data)
+{
+  getc_user_data *data = (getc_user_data *) user_data;
+
+  if (data->str[data->pos] == '\0') {
+    return FAST_JSON_EOF;
+  }
+  return data->str[data->pos++] & 0xFFu;
+}
+
+typedef struct
+{
+  size_t size;
+  char *str;
+} puts_user_data;
+
+static int
+user_puts (void *user_data, const char *str, unsigned int len)
+{
+  puts_user_data *data = (puts_user_data *) user_data;
+
+  data->str = (char *) realloc (data->str, (data->size + len));
+  if (data->str == NULL) {
+    return -1;
+  }
+  memcpy (data->str + data->size, str, len);
+  data->size += len;
+  return 0;
+}
+
 static uint64_t malloc_n_malloc = 0;
 static uint64_t malloc_n_free = 0;
 static uint64_t malloc_n_realloc = 0;
@@ -200,6 +237,8 @@ main (void)
   double double_numbers[] = { 1, 2, 3 };
   const char *string_values[] = { "1", "2", "3" };
   const char *multi_str = "42true";
+  getc_user_data getc_data = { 0, "[ 1, true, null ]" };
+  puts_user_data puts_data = { 0, NULL };
   char str[100];
 
   json = fast_json_create (my_malloc, my_realloc, my_free);
@@ -1662,6 +1701,15 @@ main (void)
 	     fast_json_error_str (fast_json_parser_error (json)));
     exit (1);
   }
+
+  v = fast_json_parse_user (json, user_getc, &getc_data);
+  fast_json_print_user (json, v, user_puts, &puts_data, 0);
+  if (strncmp (puts_data.str, "[1,true,null]", strlen ("[1,true,null]")) != 0) {
+    fprintf (stderr, "User functions fail\n");
+    exit (1);
+  }
+  free (puts_data.str);
+  fast_json_value_free (json, v);
 
   j = 10000;
   cp = (char *) malloc (j * 10);

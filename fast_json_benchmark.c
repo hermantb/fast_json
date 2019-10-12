@@ -105,6 +105,7 @@ static void *
 sender (void *data)
 {
   unsigned int i;
+  unsigned int add_newline;
   FAST_JSON_TYPE json;
   FAST_JSON_DATA_TYPE v = (FAST_JSON_DATA_TYPE) data;
 
@@ -115,8 +116,14 @@ sender (void *data)
   }
   fast_json_max_reuse (json, reuse);
   fast_json_options (json, options);
+  add_newline = (fast_json_get_type (v) != FAST_JSON_OBJECT &&
+		 fast_json_get_type (v) != FAST_JSON_ARRAY &&
+		 fast_json_get_type (v) != FAST_JSON_STRING);
   for (i = 0; i < count; i++) {
     fast_json_print_fd (json, v, sockets[0], print_nice);
+    if (add_newline) {
+      write (sockets[0], "\n", 1);
+    }
   }
   fast_json_free (json);
   return NULL;
@@ -188,6 +195,7 @@ main (int argc, char **argv)
   FAST_JSON_TYPE json;
   FAST_JSON_DATA_TYPE o;
   char *s;
+  double len;
   double start;
   double end;
   unsigned int check_alloc = 0;
@@ -377,6 +385,10 @@ main (int argc, char **argv)
     return 0;
   }
 
+  s = fast_json_print_string (json, o, print_nice);
+  len = strlen (s);
+  fast_json_release_print_value (json, s);
+
   if (print_time) {
     start = get_time ();
     for (i = 0; i < count; i++) {
@@ -384,10 +396,12 @@ main (int argc, char **argv)
       fast_json_release_print_value (json, s);
     }
     end = get_time ();
-    printf ("print     %12.9f s\n", (end - start) / count / 1e9);
+    printf ("print     %12.9f s, %10.0f chars/s\n",
+	    (end - start) / count / 1e9, len * count * 1e9 / (end - start));
   }
   if (parse_time) {
     s = fast_json_print_string (json, o, print_nice);
+    fast_json_value_free (json, o);
     start = get_time ();
     for (i = 0; i < count; i++) {
       if (fast_string) {
@@ -418,7 +432,8 @@ main (int argc, char **argv)
     }
     fast_json_release_print_value (json, s);
     end = get_time ();
-    printf ("parse     %12.9f s\n", (end - start) / count / 1e9);
+    printf ("parse     %12.9f s, %10.0f chars/s\n",
+	    (end - start) / count / 1e9, len * count * 1e9 / (end - start));
   }
 
 #ifndef WIN
@@ -433,7 +448,8 @@ main (int argc, char **argv)
     pthread_join (st, NULL);
     pthread_join (rt, NULL);
     end = get_time ();
-    fprintf (stderr, "stream:   %12.9f s\n", (end - start) / count / 1e9);
+    printf ("stream:   %12.9f s, %10.0f chars/s\n",
+	    (end - start) / count / 1e9, len * count * 1e9 / (end - start));
     close (sockets[0]);
     close (sockets[1]);
   }

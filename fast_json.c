@@ -24,7 +24,6 @@
 #include "fast_convert.h"
 #endif
 
-#define	FAST_JSON_EOF		(-1)
 #define	FAST_JSON_INITIAL_SIZE	(4)
 #define	FAST_JSON_BUFFER_SIZE	(BUFSIZ)
 #define	FAST_JSON_BIG_SIZE	(FAST_JSON_BUFFER_SIZE / \
@@ -73,10 +72,6 @@
 #define	fast_json_isspace(c)	((c) == ' ' || (c) == '\t' || \
 				 (c) == '\n' || (c) == '\r')
 
-typedef int (*fast_json_getc_func) (FAST_JSON_TYPE json);
-typedef int (*fast_json_puts_func) (FAST_JSON_TYPE json, const char *str,
-				    unsigned int len);
-
 typedef struct fast_json_big_struct
 {
   size_t count;
@@ -93,6 +88,8 @@ struct fast_json_struct
   fast_json_free_type my_free;
   fast_json_getc_func getc;
   fast_json_puts_func puts;
+  void *getc_data;
+  void *puts_data;
   union
   {
     struct
@@ -189,10 +186,10 @@ static void fast_json_data_free (FAST_JSON_TYPE json,
 static void fast_json_store_error (FAST_JSON_TYPE json,
 				   FAST_JSON_ERROR_ENUM error,
 				   const char *str);
-static int fast_json_getc_string (FAST_JSON_TYPE json);
-static int fast_json_getc_string_len (FAST_JSON_TYPE json);
-static int fast_json_getc_file (FAST_JSON_TYPE json);
-static int fast_json_getc_fd (FAST_JSON_TYPE json);
+static int fast_json_getc_string (void *user_data);
+static int fast_json_getc_string_len (void *user_data);
+static int fast_json_getc_file (void *user_data);
+static int fast_json_getc_fd (void *user_date);
 static void fast_json_ungetc (FAST_JSON_TYPE json, int c);
 static int fast_json_getc_save (FAST_JSON_TYPE json);
 static void fast_json_getc_save_start (FAST_JSON_TYPE json, int c);
@@ -216,13 +213,13 @@ static FAST_JSON_DATA_TYPE fast_json_parse_value2 (FAST_JSON_TYPE json,
 						   const char **buf);
 static FAST_JSON_DATA_TYPE fast_json_parse_all2 (FAST_JSON_TYPE json,
 						 unsigned int next);
-static int fast_json_puts_string (FAST_JSON_TYPE json, const char *str,
+static int fast_json_puts_string (void *user_data, const char *str,
 				  unsigned int len);
-static int fast_json_puts_string_len (FAST_JSON_TYPE json, const char *str,
+static int fast_json_puts_string_len (void *user_data, const char *str,
 				      unsigned int len);
-static int fast_json_puts_file (FAST_JSON_TYPE json, const char *str,
+static int fast_json_puts_file (void *user_data, const char *str,
 				unsigned int len);
-static int fast_json_puts_fd (FAST_JSON_TYPE json, const char *str,
+static int fast_json_puts_fd (void *user_data, const char *str,
 			      unsigned int len);
 static int fast_json_puts (FAST_JSON_TYPE json, const char *str,
 			   unsigned int len);
@@ -422,8 +419,9 @@ fast_json_store_error (FAST_JSON_TYPE json, FAST_JSON_ERROR_ENUM error,
 }
 
 static int
-fast_json_getc_string (FAST_JSON_TYPE json)
+fast_json_getc_string (void *user_data)
 {
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
   int c;
 
   c = json->u_parse.str.string[json->u_parse.str.pos];
@@ -435,8 +433,10 @@ fast_json_getc_string (FAST_JSON_TYPE json)
 }
 
 static int
-fast_json_getc_string_len (FAST_JSON_TYPE json)
+fast_json_getc_string_len (void *user_data)
 {
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
+
   if (json->u_parse.str.pos >= json->u_parse.str.len) {
     return FAST_JSON_EOF;
   }
@@ -444,28 +444,18 @@ fast_json_getc_string_len (FAST_JSON_TYPE json)
 }
 
 static int
-fast_json_getc_file (FAST_JSON_TYPE json)
+fast_json_getc_file (void *user_data)
 {
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
+
   return getc (json->u_parse.fp);
 }
 
 static int
-fast_json_getc_fd (FAST_JSON_TYPE json)
+fast_json_getc_fd (void *user_data)
 {
-#if 0				/* too slow */
-  char c;
-  int len;
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
 
-  do {
-    len = read (json->u_parse.fd.fd, &c, 1);
-  } while (len < 0 &&
-	   (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR));
-
-  if (len <= 0) {
-    return FAST_JSON_EOF;
-  }
-  return c & 0xFFu;
-#else
   if (json->u_parse.fd.pos >= json->u_parse.fd.len) {
     int len;
 
@@ -483,7 +473,6 @@ fast_json_getc_fd (FAST_JSON_TYPE json)
     json->u_parse.fd.pos = 0;
   }
   return json->u_parse.fd.buffer[json->u_parse.fd.pos++] & 0xFFu;
-#endif
 }
 
 static int
@@ -496,10 +485,10 @@ fast_json_getc (FAST_JSON_TYPE json)
     json->last_char = 0;
   }
   else {
-    c = json->getc (json);
-  }
-  if (c <= 0) {
-    return FAST_JSON_EOF;
+    c = json->getc (json->getc_data);
+    if (c <= 0) {
+      return FAST_JSON_EOF;
+    }
   }
   json->column += fast_json_utf8_size[c] != 0;
   json->position++;
@@ -551,18 +540,20 @@ static void
 fast_json_getc_save_start (FAST_JSON_TYPE json, int c)
 {
   json->n_save = 0;
-  if (json->max_save == 0) {
-    size_t new_max = FAST_JSON_BUFFER_SIZE;
-    char *new_save;
+  if (c > 0) {
+    if (json->max_save == 0) {
+      size_t new_max = FAST_JSON_BUFFER_SIZE;
+      char *new_save;
 
-    new_save = (char *) json->my_realloc (json->save, new_max);
-    if (new_save == NULL) {
-      return;
+      new_save = (char *) json->my_realloc (json->save, new_max);
+      if (new_save == NULL) {
+	return;
+      }
+      json->max_save = new_max;
+      json->save = new_save;
     }
-    json->max_save = new_max;
-    json->save = new_save;
+    json->save[json->n_save++] = c;
   }
-  json->save[json->n_save++] = c;
 }
 
 static char *
@@ -712,9 +703,9 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
 	  unsigned char u1 = ptr[1];
 
 	  if (u1 >= 0x80u && u1 <= 0xBFu) {
-	    error = 0;
 	    size = 2;
 	    uc = ((u & 0x1Fu) << 6) | (u1 & 0x3Fu);
+	    error = uc < 0x80u;
 	  }
 	}
 	break;
@@ -724,9 +715,9 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
 	  unsigned char u2 = ptr[2];
 
 	  if (u1 >= 0x80u && u1 <= 0xBFu && u2 >= 0x80u && u2 <= 0xBFu) {
-	    error = 0;
 	    size = 3;
 	    uc = ((u & 0x0Fu) << 12) | ((u1 & 0x3Fu) << 6) | (u2 & 0x3Fu);
+	    error = uc < 0x800u || (uc >= 0xD800u && uc <= 0xDFFFu);
 	  }
 	}
 	break;
@@ -738,22 +729,14 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
 
 	  if (u1 >= 0x80u && u1 <= 0xBFu &&
 	      u2 >= 0x80u && u2 <= 0xBFu && u3 >= 0x80u && u3 <= 0xBFu) {
-	    error = 0;
 	    size = 4;
 	    uc = ((u & 0x7u) << 18) | ((u1 & 0x3Fu) << 12) |
 	      ((u2 & 0x3Fu) << 6) | (u3 & 0x3Fu);
+	    error = uc < 0x10000 || uc > 0x10FFFFu;
 	  }
 	}
 	break;
       }
-      if (error == 0 &&
-	  (uc > 0x10FFFFu ||
-	   (uc >= 0xD800u && uc <= 0xDFFFu) ||
-	   (size == 2 && uc < 0x80u) ||
-	   (size == 3 && uc < 0x800u) || (size == 4 && uc < 0x10000u))) {
-	error = 1;
-      }
-
       if (error) {
 	fast_json_store_error (json, FAST_JSON_UTF8_ERROR, ptr);
 	return FAST_JSON_UTF8_ERROR;
@@ -1545,6 +1528,7 @@ fast_json_parse_string (FAST_JSON_TYPE json, const char *json_str)
 
   if (json && json_str) {
     json->getc = fast_json_getc_string;
+    json->getc_data = (void *) json;
     json->u_parse.str.string = json_str;
     json->u_parse.str.pos = 0;
     v = fast_json_parse_all (json, 0);
@@ -1560,6 +1544,7 @@ fast_json_parse_string_len (FAST_JSON_TYPE json, const char *json_str,
 
   if (json && json_str) {
     json->getc = fast_json_getc_string_len;
+    json->getc_data = (void *) json;
     json->u_parse.str.string = json_str;
     json->u_parse.str.pos = 0;
     json->u_parse.str.len = len;
@@ -1575,6 +1560,7 @@ fast_json_parse_file (FAST_JSON_TYPE json, FILE * fp)
 
   if (json && fp) {
     json->getc = fast_json_getc_file;
+    json->getc_data = (void *) json;
     json->u_parse.fp = fp;
     v = fast_json_parse_all (json, 0);
   }
@@ -1591,6 +1577,7 @@ fast_json_parse_file_name (FAST_JSON_TYPE json, const char *name)
 
     if (fp) {
       json->getc = fast_json_getc_file;
+      json->getc_data = (void *) json;
       json->u_parse.fp = fp;
       v = fast_json_parse_all (json, 0);
       fclose (fp);
@@ -1607,9 +1594,24 @@ fast_json_parse_fd (FAST_JSON_TYPE json, int fd)
 
   if (json) {
     json->getc = fast_json_getc_fd;
+    json->getc_data = (void *) json;
     json->u_parse.fd.fd = fd;
     json->u_parse.fd.pos = 0;
     json->u_parse.fd.len = 0;
+    v = fast_json_parse_all (json, 0);
+  }
+  return v;
+}
+
+FAST_JSON_DATA_TYPE
+fast_json_parse_user (FAST_JSON_TYPE json, fast_json_getc_func getc,
+		      void *user_data)
+{
+  FAST_JSON_DATA_TYPE v = NULL;
+
+  if (json && getc) {
+    json->getc = getc;
+    json->getc_data = user_data;
     v = fast_json_parse_all (json, 0);
   }
   return v;
@@ -2531,8 +2533,10 @@ fast_json_value_free (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value)
 }
 
 static int
-fast_json_puts_string (FAST_JSON_TYPE json, const char *str, unsigned int len)
+fast_json_puts_string (void *user_data, const char *str, unsigned int len)
 {
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
+
   if ((json->u_print.buf.len + len) > json->u_print.buf.max) {
     size_t new_max = json->u_print.buf.max +
       ((len + (FAST_JSON_BUFFER_SIZE - 1)) /
@@ -2552,11 +2556,11 @@ fast_json_puts_string (FAST_JSON_TYPE json, const char *str, unsigned int len)
 }
 
 static int
-fast_json_puts_string_len (FAST_JSON_TYPE json, const char *str,
-			   unsigned int len)
+fast_json_puts_string_len (void *user_data, const char *str, unsigned int len)
 {
-  unsigned int n = json->u_print.buf.max - json->u_print.buf.len;
-  unsigned int size = len;
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
+  size_t n = json->u_print.buf.max - json->u_print.buf.len;
+  size_t size = len;
 
   if (size > n) {
     size = n;
@@ -2569,14 +2573,18 @@ fast_json_puts_string_len (FAST_JSON_TYPE json, const char *str,
 }
 
 static int
-fast_json_puts_file (FAST_JSON_TYPE json, const char *str, unsigned int len)
+fast_json_puts_file (void *user_data, const char *str, unsigned int len)
 {
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
+
   return fwrite (str, 1, len, json->u_print.fp) == len ? 0 : -1;
 }
 
 static int
-fast_json_puts_fd (FAST_JSON_TYPE json, const char *str, unsigned int len)
+fast_json_puts_fd (void *user_data, const char *str, unsigned int len)
 {
+  FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
+
   return write (json->u_print.fd, str, len) == len ? 0 : -1;
 }
 
@@ -2599,7 +2607,7 @@ fast_json_puts (FAST_JSON_TYPE json, const char *str, unsigned int len)
       str += size;
       len -= size;
       if (json->puts_len == sizeof (json->puts_buf)) {
-	if ((*json->puts) (json, json->puts_buf, json->puts_len)) {
+	if ((*json->puts) (json->puts_data, json->puts_buf, json->puts_len)) {
 	  return -1;
 	}
 	json->puts_len = 0;
@@ -2612,11 +2620,11 @@ fast_json_puts (FAST_JSON_TYPE json, const char *str, unsigned int len)
 static int
 fast_json_last_puts (FAST_JSON_TYPE json, const char *str, unsigned int len)
 {
-  if (fast_json_puts (json, str, len)) {
+  if (len && fast_json_puts (json, str, len)) {
     return -1;
   }
   if (json->puts_len) {
-    return (*json->puts) (json, json->puts_buf, json->puts_len);
+    return (*json->puts) (json->puts_data, json->puts_buf, json->puts_len);
   }
   return 0;
 }
@@ -2987,6 +2995,7 @@ fast_json_print_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
 {
   if (json && value) {
     json->puts = fast_json_puts_string;
+    json->puts_data = (void *) json;
     json->puts_len = 0;
     json->u_print.buf.len = 0;
     json->u_print.buf.max = 0;
@@ -3011,6 +3020,7 @@ fast_json_print_string_len (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
 {
   if (json && value) {
     json->puts = fast_json_puts_string_len;
+    json->puts_data = (void *) json;
     json->puts_len = 0;
     json->u_print.buf.len = 0;
     json->u_print.buf.max = len;
@@ -3033,6 +3043,7 @@ fast_json_print_file (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
 {
   if (json && value && fp) {
     json->puts = fast_json_puts_file;
+    json->puts_data = (void *) json;
     json->puts_len = 0;
     json->u_print.fp = fp;
     json->decimal_point = *localeconv ()->decimal_point;
@@ -3058,6 +3069,7 @@ fast_json_print_file_name (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
 
     if (fp) {
       json->puts = fast_json_puts_file;
+      json->puts_data = (void *) json;
       json->puts_len = 0;
       json->u_print.fp = fp;
       json->decimal_point = *localeconv ()->decimal_point;
@@ -3077,9 +3089,30 @@ fast_json_print_fd (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
 {
   if (json && value) {
     json->puts = fast_json_puts_fd;
+    json->puts_data = (void *) json;
     json->puts_len = 0;
     json->u_print.fd = fd;
     json->decimal_point = *localeconv ()->decimal_point;
+    if (fast_json_print_buffer (json, value, 0, nice)) {
+      return -1;
+    }
+    if (fast_json_last_puts (json, "\n", nice ? 1 : 0)) {
+      return -1;
+    }
+    return 0;
+  }
+  return -1;
+}
+
+int
+fast_json_print_user (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
+		      fast_json_puts_func puts, void *user_data,
+		      unsigned int nice)
+{
+  if (json && puts) {
+    json->puts = puts;
+    json->puts_data = user_data;
+    json->puts_len = 0;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
     }

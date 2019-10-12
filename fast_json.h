@@ -127,7 +127,10 @@ extern "C"
   typedef uint64_t fast_json_int_64;
 
 /** define fast json print integer format */
-#define	FAST_JSON_FMT_INT	PRId64
+#define	FAST_JSON_FMT_INT		PRId64
+
+/** End of file character */
+#define	FAST_JSON_EOF			(-1)
 
 /** Do not check for loops */
 #define	FAST_JSON_NO_CHECK_LOOP		(0x001)
@@ -202,6 +205,13 @@ extern "C"
   typedef void *(*fast_json_malloc_type) (size_t);
   typedef void *(*fast_json_realloc_type) (void *, size_t);
   typedef void (*fast_json_free_type) (void *);
+
+/** User get character function */
+  typedef int (*fast_json_getc_func) (void *user_data);
+
+/** User put string function */
+  typedef int (*fast_json_puts_func) (void *user_data, const char *str,
+				      unsigned int len);
 
 /**
  * \b Description
@@ -394,6 +404,20 @@ extern "C"
 /**
  * \b Description
  *
+ * Parse a file descriptor to json type.
+ *
+ * \param json Json object from \ref fast_json_create.
+ * \param getc User getc function.
+ * \param user_data User data supplied to getc function.
+ * \return Parsed data or NULL in case of error.
+ */
+  extern FAST_JSON_DATA_TYPE fast_json_parse_user (FAST_JSON_TYPE json,
+						   fast_json_getc_func getc,
+						   void *user_data);
+
+/**
+ * \b Description
+ *
  * Parse the next part of json data.
  *
  * \param json Json object from \ref fast_json_create.
@@ -538,6 +562,22 @@ extern "C"
 				 FAST_JSON_DATA_TYPE value,
 				 int fd, unsigned int nice);
 
+/**
+ * \b Description
+ *
+ * Print a json type into a file descriptor.
+ *
+ * \param json Json object from \ref fast_json_create.
+ * \param value Value to print.
+ * \param puts User puts functions.
+ * \param user_data User data supplied to puts function.
+ * \param nice Use spaces, tabs and new line if not equal 0.
+ * \return -1 is an error ocurred else 0.
+ */
+  extern int fast_json_print_user (FAST_JSON_TYPE json,
+				   FAST_JSON_DATA_TYPE value,
+				   fast_json_puts_func puts,
+				   void *user_data, unsigned int nice);
 /**
  * \b Description
  *
