@@ -10,8 +10,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
+#ifndef WIN
+#include <pthread.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#endif
 #include "fast_json.h"
 
 #define RAND_IA         __UINT64_C(0x5851F42D4C957F2D)
@@ -87,6 +93,78 @@ my_free (void *ptr)
   }
 }
 
+static unsigned int count = 1000;
+static unsigned int reuse = 0;
+static unsigned int options = 0;
+static unsigned int print_nice = 0;
+
+#ifndef WIN
+static int sockets[2];
+
+static void *
+sender (void *data)
+{
+  unsigned int i;
+  FAST_JSON_TYPE json;
+  FAST_JSON_DATA_TYPE v = (FAST_JSON_DATA_TYPE) data;
+
+  json = fast_json_create (NULL, NULL, NULL);
+  if (json == NULL) {
+    fprintf (stderr, "Cannot create json\n");
+    exit (1);
+  }
+  fast_json_max_reuse (json, reuse);
+  fast_json_options (json, options);
+  for (i = 0; i < count; i++) {
+    fast_json_print_fd (json, v, sockets[0], print_nice);
+  }
+  fast_json_free (json);
+  return NULL;
+}
+
+static void *
+receiver (void *data)
+{
+  unsigned int i;
+  FAST_JSON_TYPE json;
+  FAST_JSON_DATA_TYPE v = (FAST_JSON_DATA_TYPE) data;
+  FAST_JSON_DATA_TYPE n;
+
+  json = fast_json_create (NULL, NULL, NULL);
+  if (json == NULL) {
+    fprintf (stderr, "Cannot create json\n");
+    exit (1);
+  }
+  fast_json_max_reuse (json, reuse);
+  fast_json_options (json, options | FAST_JSON_NO_EOF_CHECK);
+  for (i = 0; i < count; i++) {
+    if (i == 0) {
+      n = fast_json_parse_fd (json, sockets[1]);
+    }
+    else {
+      n = fast_json_parse_next (json);
+    }
+    if (n == NULL) {
+      fprintf (stderr, "read failed (%u): '%s' '%s' %lu %lu %lu\n",
+	       i,
+	       fast_json_error_str (fast_json_parser_error (json)),
+	       fast_json_parser_error_str (json),
+	       (unsigned long) fast_json_parser_line (json),
+	       (unsigned long) fast_json_parser_column (json),
+	       (unsigned long) fast_json_parser_position (json));
+      exit (1);
+    }
+    if (fast_json_value_equal (v, n) == 0) {
+      fprintf (stderr, "equal failed\n");
+      exit (1);
+    }
+    fast_json_value_free (json, n);
+  }
+  fast_json_free (json);
+  return NULL;
+}
+#endif
+
 static double
 get_time (void)
 {
@@ -112,15 +190,14 @@ main (int argc, char **argv)
   char *s;
   double start;
   double end;
-  unsigned int count = 1000;
-  unsigned int reuse = 0;
-  unsigned int options = 0;
   unsigned int check_alloc = 0;
   unsigned int fast_string = 0;
   unsigned int parse_time = 0;
   unsigned int print_time = 0;
+#ifndef WIN
+  unsigned int stream_time = 0;
+#endif
   unsigned int print = 0;
-  unsigned int nice = 0;
   unsigned int print_help = 0;
   char *name = NULL;
 
@@ -137,6 +214,11 @@ main (int argc, char **argv)
     else if (strcmp (argv[i], "--parse_time") == 0) {
       parse_time = 1;
     }
+#ifndef WIN
+    else if (strcmp (argv[i], "--stream_time") == 0) {
+      stream_time = 1;
+    }
+#endif
     else if (strcmp (argv[i], "--hex") == 0) {
       options |= FAST_JSON_ALLOW_OCT_HEX;
     }
@@ -159,7 +241,7 @@ main (int argc, char **argv)
       print = 1;
     }
     else if (strcmp (argv[i], "--nice") == 0) {
-      nice = 1;
+      print_nice = 1;
     }
     else if (strcmp (argv[i], "--unicode_escape") == 0) {
       options |= FAST_JSON_PRINT_UNICODE_ESCAPE;
@@ -179,6 +261,9 @@ main (int argc, char **argv)
     printf ("--reuse=n         Use object reuse\n");
     printf ("--print_time:     Run print time test\n");
     printf ("--parse_time:     Run parse time test\n");
+#ifndef WIN
+    printf ("--stream_time:    Run stream time test\n");
+#endif
     printf ("--hex:            Allow oct and hex numbers\n");
     printf ("--infnan:         Allow inf and nan\n");
     printf ("--big:            Use big allocs\n");
@@ -190,9 +275,16 @@ main (int argc, char **argv)
     printf ("--unicode_escape: Print unicode escape instead of utf8\n");
     exit (0);
   }
-  if (print_time == 0 && parse_time == 0) {
+  if (print_time == 0 && parse_time == 0
+#ifndef WIN
+      && stream_time == 0
+#endif
+    ) {
     print_time = 1;
     parse_time = 1;
+#ifndef WIN
+    stream_time = 1;
+#endif
   }
   if (count == 0) {
     count = 1000;
@@ -273,11 +365,11 @@ main (int argc, char **argv)
   }
 
   if (print) {
-    s = fast_json_print_string (json, o, nice);
+    s = fast_json_print_string (json, o, print_nice);
     fast_json_value_free (json, o);
     o = fast_json_parse_string (json, s);
     fast_json_release_print_value (json, s);
-    s = fast_json_print_string (json, o, nice);
+    s = fast_json_print_string (json, o, print_nice);
     fast_json_value_free (json, o);
     printf ("%s", s);
     fast_json_release_print_value (json, s);
@@ -288,15 +380,14 @@ main (int argc, char **argv)
   if (print_time) {
     start = get_time ();
     for (i = 0; i < count; i++) {
-      s = fast_json_print_string (json, o, nice);
+      s = fast_json_print_string (json, o, print_nice);
       fast_json_release_print_value (json, s);
     }
     end = get_time ();
     printf ("print     %12.9f s\n", (end - start) / count / 1e9);
   }
   if (parse_time) {
-    s = fast_json_print_string (json, o, nice);
-    fast_json_value_free (json, o);
+    s = fast_json_print_string (json, o, print_nice);
     start = get_time ();
     for (i = 0; i < count; i++) {
       if (fast_string) {
@@ -316,11 +407,39 @@ main (int argc, char **argv)
       }
       fast_json_value_free (json, o);
     }
+#ifndef WIN
+    if (stream_time) {
+      o = fast_json_parse_string2 (json, s);
+    }
+    else
+#endif
+    {
+      o = NULL;
+    }
     fast_json_release_print_value (json, s);
     end = get_time ();
     printf ("parse     %12.9f s\n", (end - start) / count / 1e9);
   }
 
+#ifndef WIN
+  if (stream_time) {
+    pthread_t rt;
+    pthread_t st;
+
+    socketpair (AF_UNIX, SOCK_STREAM, 0, &sockets[0]);
+    start = get_time ();
+    pthread_create (&st, NULL, sender, o);
+    pthread_create (&rt, NULL, receiver, o);
+    pthread_join (st, NULL);
+    pthread_join (rt, NULL);
+    end = get_time ();
+    fprintf (stderr, "stream:   %12.9f s\n", (end - start) / count / 1e9);
+    close (sockets[0]);
+    close (sockets[1]);
+  }
+#endif
+
+  fast_json_value_free (json, o);
   fast_json_free (json);
 
   if (check_alloc) {

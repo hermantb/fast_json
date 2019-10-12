@@ -26,7 +26,7 @@
 
 #define	FAST_JSON_EOF		(-1)
 #define	FAST_JSON_INITIAL_SIZE	(4)
-#define	FAST_JSON_BUFFER_SIZE	(4096)
+#define	FAST_JSON_BUFFER_SIZE	(BUFSIZ)
 #define	FAST_JSON_BIG_SIZE	(FAST_JSON_BUFFER_SIZE / \
 				 sizeof (struct fast_json_data_struct))
 
@@ -85,7 +85,6 @@ typedef struct fast_json_big_struct
 
 struct fast_json_struct
 {
-  const char *json_str;
   char decimal_point;
   FAST_JSON_ERROR_ENUM error;
   unsigned int options;
@@ -110,13 +109,19 @@ struct fast_json_struct
       size_t pos;
       size_t len;
     } fd;
+    const char *json_str;
+  } u_parse;
+  union
+  {
+    FILE *fp;
+    int fd;
     struct
     {
       size_t len;
       size_t max;
       char *txt;
     } buf;
-  } u;
+  } u_print;
   int last_char;
   unsigned int puts_len;
   char puts_buf[FAST_JSON_BUFFER_SIZE];
@@ -200,7 +205,8 @@ static FAST_JSON_ERROR_ENUM fast_json_check_string (FAST_JSON_TYPE json,
 						    const char *end,
 						    char *out);
 static FAST_JSON_DATA_TYPE fast_json_parse_value (FAST_JSON_TYPE json, int c);
-static FAST_JSON_DATA_TYPE fast_json_parse_all (FAST_JSON_TYPE json);
+static FAST_JSON_DATA_TYPE fast_json_parse_all (FAST_JSON_TYPE json,
+						unsigned int next);
 static FAST_JSON_ERROR_ENUM fast_json_skip_whitespace2 (FAST_JSON_TYPE json,
 							const char **buf);
 static void fast_json_store_error2 (FAST_JSON_TYPE json,
@@ -208,6 +214,8 @@ static void fast_json_store_error2 (FAST_JSON_TYPE json,
 				    const char *cp, const char *sep);
 static FAST_JSON_DATA_TYPE fast_json_parse_value2 (FAST_JSON_TYPE json,
 						   const char **buf);
+static FAST_JSON_DATA_TYPE fast_json_parse_all2 (FAST_JSON_TYPE json,
+						 unsigned int next);
 static int fast_json_puts_string (FAST_JSON_TYPE json, const char *str,
 				  unsigned int len);
 static int fast_json_puts_string_len (FAST_JSON_TYPE json, const char *str,
@@ -243,7 +251,8 @@ static void fast_json_update_crc (unsigned int *crc, const char *str);
 static FAST_JSON_ERROR_ENUM fast_json_parse_crc (FAST_JSON_TYPE json,
 						 unsigned int *crc, int c);
 static FAST_JSON_ERROR_ENUM fast_json_calc_crc_all (FAST_JSON_TYPE json,
-						    unsigned int *res_crc);
+						    unsigned int *res_crc,
+						    unsigned int next);
 
 static const char fast_json_utf8_size[256] = {
   1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -322,8 +331,7 @@ fast_json_data_create (FAST_JSON_TYPE json)
       FAST_JSON_BIG_TYPE *b = json->big_malloc_free;
 
       if (b == NULL) {
-	size_t size =
-	  json->n_big_malloc == 0 ? 1 : json->n_big_malloc * 2;
+	size_t size = json->n_big_malloc == 0 ? 1 : json->n_big_malloc * 2;
 
 	b =
 	  (FAST_JSON_BIG_TYPE *) (*json->my_realloc) (json->big_malloc,
@@ -418,27 +426,27 @@ fast_json_getc_string (FAST_JSON_TYPE json)
 {
   int c;
 
-  c = json->u.str.string[json->u.str.pos];
+  c = json->u_parse.str.string[json->u_parse.str.pos];
   if (c == '\0') {
     return FAST_JSON_EOF;
   }
-  json->u.str.pos++;
+  json->u_parse.str.pos++;
   return c & 0xFFu;
 }
 
 static int
 fast_json_getc_string_len (FAST_JSON_TYPE json)
 {
-  if (json->u.str.pos >= json->u.str.len) {
+  if (json->u_parse.str.pos >= json->u_parse.str.len) {
     return FAST_JSON_EOF;
   }
-  return json->u.str.string[json->u.str.pos++] & 0xFFu;
+  return json->u_parse.str.string[json->u_parse.str.pos++] & 0xFFu;
 }
 
 static int
 fast_json_getc_file (FAST_JSON_TYPE json)
 {
-  return getc (json->u.fp);
+  return getc (json->u_parse.fp);
 }
 
 static int
@@ -446,24 +454,35 @@ fast_json_getc_fd (FAST_JSON_TYPE json)
 {
 #if 0				/* too slow */
   char c;
-  int len = read (json->u.fd.fd, &c, 1);
+  int len;
+
+  do {
+    len = read (json->u_parse.fd.fd, &c, 1);
+  } while (len < 0 &&
+	   (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR));
 
   if (len <= 0) {
     return FAST_JSON_EOF;
   }
   return c & 0xFFu;
 #else
-  if (json->u.fd.pos >= json->u.fd.len) {
-    int len =
-      read (json->u.fd.fd, json->u.fd.buffer, sizeof (json->u.fd.buffer));
+  if (json->u_parse.fd.pos >= json->u_parse.fd.len) {
+    int len;
+
+    do {
+      len =
+	read (json->u_parse.fd.fd, json->u_parse.fd.buffer,
+	      sizeof (json->u_parse.fd.buffer));
+    } while (len < 0 &&
+	     (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR));
 
     if (len <= 0) {
       return FAST_JSON_EOF;
     }
-    json->u.fd.len = len;
-    json->u.fd.pos = 0;
+    json->u_parse.fd.len = len;
+    json->u_parse.fd.pos = 0;
   }
-  return json->u.fd.buffer[json->u.fd.pos++] & 0xFFu;
+  return json->u_parse.fd.buffer[json->u_parse.fd.pos++] & 0xFFu;
 #endif
 }
 
@@ -1352,6 +1371,12 @@ fast_json_options (FAST_JSON_TYPE json, unsigned int value)
   return retval;
 }
 
+unsigned int
+fast_json_get_options (FAST_JSON_TYPE json)
+{
+  return json ? json->options : 0;
+}
+
 FAST_JSON_ERROR_ENUM
 fast_json_max_reuse (FAST_JSON_TYPE json, size_t n)
 {
@@ -1472,19 +1497,19 @@ fast_json_parser_error_str (FAST_JSON_TYPE json)
 }
 
 static FAST_JSON_DATA_TYPE
-fast_json_parse_all (FAST_JSON_TYPE json)
+fast_json_parse_all (FAST_JSON_TYPE json, unsigned int next)
 {
   int c;
   FAST_JSON_DATA_TYPE v = NULL;
-  unsigned int save_options = json->options;
 
-  json->options |= FAST_JSON_NO_CHECK_LOOP;
-  json->error = FAST_JSON_OK;
-  json->error_str[0] = '\0';
-  json->line = 1;
-  json->column = 0;
-  json->position = 0;
-  json->last_char = 0;
+  if (next == 0) {
+    json->error = FAST_JSON_OK;
+    json->error_str[0] = '\0';
+    json->line = 1;
+    json->column = 0;
+    json->position = 0;
+    json->last_char = 0;
+  }
   json->decimal_point = *localeconv ()->decimal_point;
   if (fast_json_skip_whitespace (json, &c) == FAST_JSON_OK) {
     if (c != FAST_JSON_EOF) {
@@ -1510,7 +1535,6 @@ fast_json_parse_all (FAST_JSON_TYPE json)
       json->error = FAST_JSON_NO_DATA_ERROR;
     }
   }
-  json->options = save_options;
   return v;
 }
 
@@ -1521,9 +1545,9 @@ fast_json_parse_string (FAST_JSON_TYPE json, const char *json_str)
 
   if (json && json_str) {
     json->getc = fast_json_getc_string;
-    json->u.str.string = json_str;
-    json->u.str.pos = 0;
-    v = fast_json_parse_all (json);
+    json->u_parse.str.string = json_str;
+    json->u_parse.str.pos = 0;
+    v = fast_json_parse_all (json, 0);
   }
   return v;
 }
@@ -1536,10 +1560,10 @@ fast_json_parse_string_len (FAST_JSON_TYPE json, const char *json_str,
 
   if (json && json_str) {
     json->getc = fast_json_getc_string_len;
-    json->u.str.string = json_str;
-    json->u.str.pos = 0;
-    json->u.str.len = len;
-    v = fast_json_parse_all (json);
+    json->u_parse.str.string = json_str;
+    json->u_parse.str.pos = 0;
+    json->u_parse.str.len = len;
+    v = fast_json_parse_all (json, 0);
   }
   return v;
 }
@@ -1551,11 +1575,8 @@ fast_json_parse_file (FAST_JSON_TYPE json, FILE * fp)
 
   if (json && fp) {
     json->getc = fast_json_getc_file;
-    json->u.fp = fp;
-    v = fast_json_parse_all (json);
-    if (v && json->last_char) {
-      ungetc (json->last_char, fp);
-    }
+    json->u_parse.fp = fp;
+    v = fast_json_parse_all (json, 0);
   }
   return v;
 }
@@ -1570,9 +1591,10 @@ fast_json_parse_file_name (FAST_JSON_TYPE json, const char *name)
 
     if (fp) {
       json->getc = fast_json_getc_file;
-      json->u.fp = fp;
-      v = fast_json_parse_all (json);
+      json->u_parse.fp = fp;
+      v = fast_json_parse_all (json, 0);
       fclose (fp);
+      json->u_parse.fp = NULL;
     }
   }
   return v;
@@ -1585,10 +1607,23 @@ fast_json_parse_fd (FAST_JSON_TYPE json, int fd)
 
   if (json) {
     json->getc = fast_json_getc_fd;
-    json->u.fd.fd = fd;
-    json->u.fd.pos = 0;
-    json->u.fd.len = 0;
-    v = fast_json_parse_all (json);
+    json->u_parse.fd.fd = fd;
+    json->u_parse.fd.pos = 0;
+    json->u_parse.fd.len = 0;
+    v = fast_json_parse_all (json, 0);
+  }
+  return v;
+}
+
+FAST_JSON_DATA_TYPE
+fast_json_parse_next (FAST_JSON_TYPE json)
+{
+  FAST_JSON_DATA_TYPE v = NULL;
+
+  if (json &&
+      (json->getc != NULL &&
+       (json->getc != fast_json_getc_file || json->u_parse.fp != NULL))) {
+    v = fast_json_parse_all (json, 1);
   }
   return v;
 }
@@ -1621,7 +1656,7 @@ fast_json_store_error2 (FAST_JSON_TYPE json, FAST_JSON_ERROR_ENUM error,
     }
     rp++;
   }
-  s = json->json_str;
+  s = json->u_parse.json_str;
   json->line = 1;
   json->column = 0;
   json->position = 0;
@@ -2188,19 +2223,19 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
   return v;
 }
 
-FAST_JSON_DATA_TYPE
-fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
+static FAST_JSON_DATA_TYPE
+fast_json_parse_all2 (FAST_JSON_TYPE json, unsigned int next)
 {
   FAST_JSON_DATA_TYPE v = NULL;
-  unsigned int save_options = json->options;
+  const char *json_str = json->u_parse.json_str;
 
-  json->options |= FAST_JSON_NO_CHECK_LOOP;
-  json->json_str = json_str;
-  json->error = FAST_JSON_OK;
-  json->error_str[0] = '\0';
-  json->line = 1;
-  json->column = 0;
-  json->position = 0;
+  if (next == 0) {
+    json->error = FAST_JSON_OK;
+    json->error_str[0] = '\0';
+    json->line = 1;
+    json->column = 0;
+    json->position = 0;
+  }
   json->decimal_point = *localeconv ()->decimal_point;
   if (fast_json_skip_whitespace2 (json, &json_str) == FAST_JSON_OK) {
     if (*json_str != '\0') {
@@ -2214,6 +2249,9 @@ fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
 	      fast_json_value_free (json, v);
 	      v = NULL;
 	    }
+	    else {
+	      json->u_parse.json_str = json_str;
+	    }
 	  }
 	  else {
 	    fast_json_value_free (json, v);
@@ -2221,11 +2259,8 @@ fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
 	  }
 	}
 	else {
-	  const char *s = json->json_str;
+	  const char *s = json->u_parse.json_str;
 
-	  json->line = 1;
-	  json->column = 0;
-	  json->position = 0;
 	  while (s != json_str) {
 	    json->position++;
 	    json->column += fast_json_utf8_size[*s & 0xFFu] != 0;
@@ -2235,6 +2270,7 @@ fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
 	    }
 	    s++;
 	  }
+	  json->u_parse.json_str = json_str;
 	}
       }
     }
@@ -2242,8 +2278,26 @@ fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
       json->error = FAST_JSON_NO_DATA_ERROR;
     }
   }
-  json->options = save_options;
   return v;
+}
+
+FAST_JSON_DATA_TYPE
+fast_json_parse_string2 (FAST_JSON_TYPE json, const char *json_str)
+{
+  if (json && json_str) {
+    json->u_parse.json_str = json_str;
+    return fast_json_parse_all2 (json, 0);
+  }
+  return NULL;
+}
+
+FAST_JSON_DATA_TYPE
+fast_json_parse_string2_next (FAST_JSON_TYPE json)
+{
+  if (json) {
+    return fast_json_parse_all2 (json, 1);
+  }
+  return NULL;
 }
 
 int
@@ -2309,8 +2363,7 @@ fast_json_value_equal (FAST_JSON_DATA_TYPE value1, FAST_JSON_DATA_TYPE value2)
 	char *str2 = value2->is_str ? &value2->u.i_string_value[0]
 	  : value2->u.string_value;
 
-	if (str1[0] != str2[0] ||
-	    strcmp (&str1[1], &str2[1]) != 0) {
+	if (str1[0] != str2[0] || strcmp (&str1[1], &str2[1]) != 0) {
 	  return 0;
 	}
       }
@@ -2480,21 +2533,21 @@ fast_json_value_free (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value)
 static int
 fast_json_puts_string (FAST_JSON_TYPE json, const char *str, unsigned int len)
 {
-  if ((json->u.buf.len + len) > json->u.buf.max) {
-    size_t new_max = json->u.buf.max +
+  if ((json->u_print.buf.len + len) > json->u_print.buf.max) {
+    size_t new_max = json->u_print.buf.max +
       ((len + (FAST_JSON_BUFFER_SIZE - 1)) /
        FAST_JSON_BUFFER_SIZE) * FAST_JSON_BUFFER_SIZE;
     char *new_txt;
 
-    new_txt = (char *) (*json->my_realloc) (json->u.buf.txt, new_max);
+    new_txt = (char *) (*json->my_realloc) (json->u_print.buf.txt, new_max);
     if (new_txt == NULL) {
       return -1;
     }
-    json->u.buf.max = new_max;
-    json->u.buf.txt = new_txt;
+    json->u_print.buf.max = new_max;
+    json->u_print.buf.txt = new_txt;
   }
-  memcpy (json->u.buf.txt + json->u.buf.len, str, len);
-  json->u.buf.len += len;
+  memcpy (json->u_print.buf.txt + json->u_print.buf.len, str, len);
+  json->u_print.buf.len += len;
   return 0;
 }
 
@@ -2502,29 +2555,29 @@ static int
 fast_json_puts_string_len (FAST_JSON_TYPE json, const char *str,
 			   unsigned int len)
 {
-  unsigned int n = json->u.buf.max - json->u.buf.len;
+  unsigned int n = json->u_print.buf.max - json->u_print.buf.len;
   unsigned int size = len;
 
   if (size > n) {
     size = n;
   }
-  if ((json->u.buf.len + size) <= json->u.buf.max) {
-    memcpy (json->u.buf.txt + json->u.buf.len, str, size);
+  if ((json->u_print.buf.len + size) <= json->u_print.buf.max) {
+    memcpy (json->u_print.buf.txt + json->u_print.buf.len, str, size);
   }
-  json->u.buf.len += len;
+  json->u_print.buf.len += len;
   return 0;
 }
 
 static int
 fast_json_puts_file (FAST_JSON_TYPE json, const char *str, unsigned int len)
 {
-  return fwrite (str, 1, len, json->u.fp) == len ? 0 : -1;
+  return fwrite (str, 1, len, json->u_print.fp) == len ? 0 : -1;
 }
 
 static int
 fast_json_puts_fd (FAST_JSON_TYPE json, const char *str, unsigned int len)
 {
-  return write (json->u.fd.fd, str, len) == len ? 0 : -1;
+  return write (json->u_print.fd, str, len) == len ? 0 : -1;
 }
 
 static int
@@ -2935,19 +2988,19 @@ fast_json_print_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
   if (json && value) {
     json->puts = fast_json_puts_string;
     json->puts_len = 0;
-    json->u.buf.len = 0;
-    json->u.buf.max = 0;
-    json->u.buf.txt = NULL;
+    json->u_print.buf.len = 0;
+    json->u_print.buf.max = 0;
+    json->u_print.buf.txt = NULL;
     json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
-      (*json->my_free) (json->u.buf.txt);
+      (*json->my_free) (json->u_print.buf.txt);
       return NULL;
     }
     if (fast_json_last_puts (json, nice ? "\n" : "", nice ? 2 : 1)) {
-      (*json->my_free) (json->u.buf.txt);
+      (*json->my_free) (json->u_print.buf.txt);
       return NULL;
     }
-    return json->u.buf.txt;
+    return json->u_print.buf.txt;
   }
   return NULL;
 }
@@ -2959,9 +3012,9 @@ fast_json_print_string_len (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
   if (json && value) {
     json->puts = fast_json_puts_string_len;
     json->puts_len = 0;
-    json->u.buf.len = 0;
-    json->u.buf.max = len;
-    json->u.buf.txt = str;
+    json->u_print.buf.len = 0;
+    json->u_print.buf.max = len;
+    json->u_print.buf.txt = str;
     json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
@@ -2969,7 +3022,7 @@ fast_json_print_string_len (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     if (fast_json_last_puts (json, nice ? "\n" : "", nice ? 2 : 1)) {
       return -1;
     }
-    return json->u.buf.len;
+    return json->u_print.buf.len;
   }
   return -1;
 }
@@ -2981,7 +3034,7 @@ fast_json_print_file (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
   if (json && value && fp) {
     json->puts = fast_json_puts_file;
     json->puts_len = 0;
-    json->u.fp = fp;
+    json->u_print.fp = fp;
     json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
@@ -3006,7 +3059,7 @@ fast_json_print_file_name (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
     if (fp) {
       json->puts = fast_json_puts_file;
       json->puts_len = 0;
-      json->u.fp = fp;
+      json->u_print.fp = fp;
       json->decimal_point = *localeconv ()->decimal_point;
       retval = fast_json_print_buffer (json, value, 0, nice);
       if (retval == 0) {
@@ -3025,7 +3078,7 @@ fast_json_print_fd (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value,
   if (json && value) {
     json->puts = fast_json_puts_fd;
     json->puts_len = 0;
-    json->u.fd.fd = fd;
+    json->u_print.fd = fd;
     json->decimal_point = *localeconv ()->decimal_point;
     if (fast_json_print_buffer (json, value, 0, nice)) {
       return -1;
@@ -3176,9 +3229,9 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
 	    strcpy (item->u.i_string_value, new_value);
 	  }
 	}
-        else if (new_value != &str[0]) {
+	else if (new_value != &str[0]) {
 	  (*json->my_free) (new_value);
-        }
+	}
       }
       else if (new_value != &str[0]) {
 	(*json->my_free) (new_value);
@@ -4290,18 +4343,21 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 }
 
 static FAST_JSON_ERROR_ENUM
-fast_json_calc_crc_all (FAST_JSON_TYPE json, unsigned int *res_crc)
+fast_json_calc_crc_all (FAST_JSON_TYPE json, unsigned int *res_crc,
+			unsigned int next)
 {
   int c;
   FAST_JSON_ERROR_ENUM error;
   unsigned int crc = 0xFFFFFFFFu;
 
-  json->error = FAST_JSON_OK;
-  json->error_str[0] = '\0';
-  json->line = 1;
-  json->column = 0;
-  json->position = 0;
-  json->last_char = 0;
+  if (next == 0) {
+    json->error = FAST_JSON_OK;
+    json->error_str[0] = '\0';
+    json->line = 1;
+    json->column = 0;
+    json->position = 0;
+    json->last_char = 0;
+  }
   error = fast_json_skip_whitespace (json, &c);
   if (error == FAST_JSON_OK) {
     if (c != FAST_JSON_EOF) {
@@ -4335,9 +4391,9 @@ fast_json_calc_crc_string (FAST_JSON_TYPE json, const char *json_str,
 
   if (json && json_str && res_crc) {
     json->getc = fast_json_getc_string;
-    json->u.str.string = json_str;
-    json->u.str.pos = 0;
-    error = fast_json_calc_crc_all (json, res_crc);
+    json->u_parse.str.string = json_str;
+    json->u_parse.str.pos = 0;
+    error = fast_json_calc_crc_all (json, res_crc, 0);
   }
   return error;
 }
@@ -4350,10 +4406,10 @@ fast_json_calc_crc_string_len (FAST_JSON_TYPE json, const char *json_str,
 
   if (json && json_str && res_crc) {
     json->getc = fast_json_getc_string_len;
-    json->u.str.string = json_str;
-    json->u.str.pos = 0;
-    json->u.str.len = len;
-    error = fast_json_calc_crc_all (json, res_crc);
+    json->u_parse.str.string = json_str;
+    json->u_parse.str.pos = 0;
+    json->u_parse.str.len = len;
+    error = fast_json_calc_crc_all (json, res_crc, 0);
   }
   return error;
 }
@@ -4366,11 +4422,8 @@ fast_json_calc_crc_file (FAST_JSON_TYPE json, FILE * fp,
 
   if (json && fp && res_crc) {
     json->getc = fast_json_getc_file;
-    json->u.fp = fp;
-    error = fast_json_calc_crc_all (json, res_crc);
-    if (error == FAST_JSON_OK && json->last_char) {
-      ungetc (json->last_char, fp);
-    }
+    json->u_parse.fp = fp;
+    error = fast_json_calc_crc_all (json, res_crc, 0);
   }
   return error;
 }
@@ -4386,9 +4439,10 @@ fast_json_calc_crc_file_name (FAST_JSON_TYPE json, const char *name,
 
     if (fp) {
       json->getc = fast_json_getc_file;
-      json->u.fp = fp;
-      error = fast_json_calc_crc_all (json, res_crc);
+      json->u_parse.fp = fp;
+      error = fast_json_calc_crc_all (json, res_crc, 0);
       fclose (fp);
+      json->u_parse.fp = NULL;
     }
   }
   return error;
@@ -4401,10 +4455,23 @@ fast_json_calc_crc_fd (FAST_JSON_TYPE json, int fd, unsigned int *res_crc)
 
   if (json && res_crc) {
     json->getc = fast_json_getc_fd;
-    json->u.fd.fd = fd;
-    json->u.fd.pos = 0;
-    json->u.fd.len = 0;
-    error = fast_json_calc_crc_all (json, res_crc);
+    json->u_parse.fd.fd = fd;
+    json->u_parse.fd.pos = 0;
+    json->u_parse.fd.len = 0;
+    error = fast_json_calc_crc_all (json, res_crc, 0);
+  }
+  return error;
+}
+
+FAST_JSON_ERROR_ENUM
+fast_json_calc_crc_next (FAST_JSON_TYPE json, unsigned int *res_crc)
+{
+  FAST_JSON_ERROR_ENUM error = FAST_JSON_OK;
+
+  if (json && res_crc &&
+      (json->getc != NULL &&
+       (json->getc != fast_json_getc_file || json->u_parse.fp != NULL))) {
+    error = fast_json_calc_crc_all (json, res_crc, 1);
   }
   return error;
 }

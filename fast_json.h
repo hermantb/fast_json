@@ -263,6 +263,16 @@ extern "C"
 /**
  * \b Description
  *
+ * Get parser options.
+ *
+ * \param json Json object from \ref fast_json_create.
+ * \return Options set with \ref fast_json_options
+ */
+  extern unsigned int fast_json_get_options (FAST_JSON_TYPE json);
+
+/**
+ * \b Description
+ *
  * Return line number.
  *
  * \param json Json object from \ref fast_json_create.
@@ -384,6 +394,16 @@ extern "C"
 /**
  * \b Description
  *
+ * Parse the next part of json data.
+ *
+ * \param json Json object from \ref fast_json_create.
+ * \return Parsed data or NULL in case of error.
+ */
+  extern FAST_JSON_DATA_TYPE fast_json_parse_next (FAST_JSON_TYPE json);
+
+/**
+ * \b Description
+ *
  * Parse a string to json type. This is a faster version.
  *
  * \param json Json object from \ref fast_json_create.
@@ -392,6 +412,17 @@ extern "C"
  */
   extern FAST_JSON_DATA_TYPE fast_json_parse_string2 (FAST_JSON_TYPE json,
 						      const char *json_str);
+
+/**
+ * \b Description
+ *
+ * Parse the next part of json data.
+ *
+ * \param json Json object from \ref fast_json_create.
+ * \return Parsed data or NULL in case of error.
+ */
+  extern FAST_JSON_DATA_TYPE fast_json_parse_string2_next (FAST_JSON_TYPE
+							   json);
 
 /**
  * \b Description
@@ -1058,6 +1089,18 @@ extern "C"
   extern FAST_JSON_ERROR_ENUM fast_json_calc_crc_fd (FAST_JSON_TYPE json,
 						     int fd,
 						     unsigned int *crc);
+
+/**
+ * \b Description
+ *
+ * Generate next crc of json data.
+ *
+ * \param json Json object from \ref fast_json_create.
+ * \param crc Returned crc.
+ * \return Enum with error information.
+ */
+  extern FAST_JSON_ERROR_ENUM fast_json_calc_crc_next (FAST_JSON_TYPE json,
+						       unsigned int *crc);
 
 #if defined (__cplusplus)
 }

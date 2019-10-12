@@ -1455,7 +1455,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  n = fast_json_parse_file (json, fp);
+  n = fast_json_parse_next (json);
   cp = fast_json_print_string (json, n, 0);
   if (strcmp (cp, "true") != 0) {
     fprintf (stderr, "read noeof failed. true\n");
@@ -1463,7 +1463,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  n = fast_json_parse_file (json, fp);
+  n = fast_json_parse_next (json);
   if (n != NULL) {
     fprintf (stderr, "read noeof failed. extra data\n");
     exit (1);
@@ -1483,8 +1483,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  i = fast_json_parser_position (json);
-  n = fast_json_parse_string (json, &multi_str[i]);
+  n = fast_json_parse_next (json);
   cp = fast_json_print_string (json, n, 0);
   if (strcmp (cp, "true") != 0) {
     fprintf (stderr, "read noeof failed. true\n");
@@ -1492,8 +1491,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  i += fast_json_parser_position (json);
-  n = fast_json_parse_string (json, &multi_str[i]);
+  n = fast_json_parse_next (json);
   if (n != NULL) {
     fprintf (stderr, "read noeof failed. extra data\n");
     exit (1);
@@ -1512,8 +1510,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  i = fast_json_parser_position (json);
-  n = fast_json_parse_string2 (json, &multi_str[i]);
+  n = fast_json_parse_string2_next (json);
   cp = fast_json_print_string (json, n, 0);
   if (strcmp (cp, "true") != 0) {
     fprintf (stderr, "read noeof failed. true\n");
@@ -1521,8 +1518,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  i += fast_json_parser_position (json);
-  n = fast_json_parse_string2 (json, &multi_str[i]);
+  n = fast_json_parse_string2_next (json);
   if (n != NULL) {
     fprintf (stderr, "read noeof failed. extra data\n");
     exit (1);
@@ -1542,9 +1538,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  i = fast_json_parser_position (json);
-  lseek (fd, i, SEEK_SET);
-  n = fast_json_parse_fd (json, fd);
+  n = fast_json_parse_next (json);
   cp = fast_json_print_string (json, n, 0);
   if (strcmp (cp, "true") != 0) {
     fprintf (stderr, "read noeof failed. true\n");
@@ -1552,9 +1546,7 @@ main (void)
   }
   fast_json_release_print_value (json, cp);
   fast_json_value_free (json, n);
-  i += fast_json_parser_position (json);
-  lseek (fd, i, SEEK_SET);
-  n = fast_json_parse_fd (json, fd);
+  n = fast_json_parse_next (json);
   if (n != NULL) {
     fprintf (stderr, "read noeof failed. extra data\n");
     exit (1);

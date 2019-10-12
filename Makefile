@@ -14,7 +14,7 @@ all: fast_json_benchmark fast_json_test libfast_json.a libfast_json.so
 allf: all fast_json_benchmarkf fast_json_testf
 
 fast_json_benchmark: fast_json_benchmark.c libfast_json.a
-	${CC} ${OPTIONS} fast_json_benchmark.c libfast_json.a -o fast_json_benchmark
+	${CC} ${OPTIONS} fast_json_benchmark.c libfast_json.a -o fast_json_benchmark -lpthread
 
 fast_json_test: fast_json_test.c libfast_json.a
 	${CC} ${OPTIONS} fast_json_test.c libfast_json.a -o fast_json_test
@@ -35,7 +35,7 @@ libfast_jsonf.a: fast_json.h fast_json.c fast_convert/libfast_convert.a
 	rm fast_json.o
 
 fast_json_benchmarkf: fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a
-	${CC} ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_benchmarkf
+	${CC} ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_benchmarkf -lpthread
 
 fast_json_testf: fast_json_test.c libfast_jsonf.a fast_convert/libfast_convert.a
 	${CC} ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT fast_json_test.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_testf
