@@ -22,8 +22,9 @@ fast_json_test: fast_json_test.c libfast_json.a
 libfast_json.a: fast_json.h fast_json.c
 	${CC} ${OPTIONS} -c fast_json.c
 	rm -f libfast_json.a
-	ar rv libfast_json.a fast_json.o
-	rm fast_json.o
+	ar rc libfast_json.a fast_json.o
+	which ranlib >/dev/null 2>&1 && ranlib libfast_json.a
+	rm -f fast_json.o
 
 libfast_json.so: fast_json.h fast_json.c
 	${CC} ${OPTIONS} -fPIC -shared -o libfast_json.so fast_json.c
@@ -31,8 +32,9 @@ libfast_json.so: fast_json.h fast_json.c
 libfast_jsonf.a: fast_json.h fast_json.c fast_convert/libfast_convert.a
 	${CC} ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT -c fast_json.c
 	rm -f libfast_jsonf.a
-	ar rv libfast_jsonf.a fast_json.o
-	rm fast_json.o
+	ar rc libfast_jsonf.a fast_json.o
+	which ranlib >/dev/null 2>&1 && ranlib libfast_jsonf.a
+	rm -f fast_json.o
 
 fast_json_benchmarkf: fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a
 	${CC} ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT fast_json_benchmark.c libfast_jsonf.a fast_convert/libfast_convert.a -o fast_json_benchmarkf -lpthread

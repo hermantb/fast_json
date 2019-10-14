@@ -806,7 +806,7 @@ extern "C"
 /**
  * \b Description
  *
- * Insert array at index with value.
+ * Insert array at index with value. (Slow for large arrays)
  *
  * \param json Json object from \ref fast_json_create.
  * \param array Json array.
@@ -823,7 +823,7 @@ extern "C"
 /**
  * \b Description
  *
- * Remove value in array at index.
+ * Remove value in array at index. (Slow for large arrays)
  *
  * \param json Json object from \ref fast_json_create.
  * \param array Json array.
@@ -854,7 +854,7 @@ extern "C"
 /**
  * \b Description
  *
- * Insert object at index with value.
+ * Insert object at index with value. (Slow for large objects)
  *
  * \param json Json object from \ref fast_json_create.
  * \param object Json object.
@@ -873,7 +873,7 @@ extern "C"
 /**
  * \b Description
  *
- * Remove value in object at index.
+ * Remove value in object at index. (Slow for large objects)
  *
  * \param json Json object from \ref fast_json_create.
  * \param object Json object.

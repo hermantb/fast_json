@@ -73,6 +73,7 @@ Options:
 --reuse=n         Use object reuse
 --print_time:     Run print time test
 --parse_time:     Run parse time test
+--stream_time:    Run stream time test
 --hex:            Allow oct and hex numbers
 --infnan:         Allow inf and nan
 --big:            Use big allocs
@@ -84,7 +85,7 @@ Options:
 --unicode_escape: Print unicode escape instead of utf8
 </pre>
 
-Default there is a simple internal test. Normally you supply a file to run the benchmark. If you do not supply --print_time or --parse_time both are run.
+Default there is a simple internal test. Normally you supply a file to run the benchmark. If you do not supply --print_time, --parse_time or --stream_time all 3 benchmarks are run.
 
 ## License
 

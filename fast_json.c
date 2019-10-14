@@ -24,7 +24,7 @@
 #include "fast_convert.h"
 #endif
 
-#define	FAST_JSON_INITIAL_SIZE	(4)
+#define	FAST_JSON_INITIAL_SIZE	(8)	/* must be power of 2 */
 #define	FAST_JSON_BUFFER_SIZE	(BUFSIZ)
 #define	FAST_JSON_BIG_SIZE	(FAST_JSON_BUFFER_SIZE / \
 				 sizeof (struct fast_json_data_struct))
@@ -140,6 +140,9 @@ struct fast_json_struct
 
 typedef struct fast_json_name_value_struct
 {
+  size_t hash;
+  struct fast_json_name_value_struct *next;
+  struct fast_json_name_value_struct *hash_table;
   char *name;
   FAST_JSON_DATA_TYPE value;
 } FAST_JSON_NAME_VALUE_TYPE;
@@ -238,6 +241,7 @@ static FAST_JSON_ERROR_ENUM fast_json_add_array_end (FAST_JSON_TYPE json,
 						     array,
 						     FAST_JSON_DATA_TYPE
 						     value);
+static void fast_json_init_hash (FAST_JSON_OBJECT_TYPE * o);
 static FAST_JSON_ERROR_ENUM fast_json_add_object_end (FAST_JSON_TYPE json,
 						      FAST_JSON_DATA_TYPE
 						      object,
@@ -2490,8 +2494,8 @@ fast_json_value_free (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value)
 	    (*json->my_free) (o->data[i].name);
 	    fast_json_value_free (json, o->data[i].value);
 	  }
+	  (*json->my_free) (o);
 	}
-	(*json->my_free) (o);
 	fast_json_data_free (json, value);
       }
       break;
@@ -3528,13 +3532,33 @@ fast_json_add_array (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
   return retval;
 }
 
+static void
+fast_json_init_hash (FAST_JSON_OBJECT_TYPE * o)
+{
+  size_t i;
+  size_t mask = o->max - 1;
+  FAST_JSON_NAME_VALUE_TYPE *data = &o->data[0];
+
+  for (i = 0; i < o->max; i++) {
+    data[i].hash_table = NULL;
+  }
+  for (i = 0; i < o->len; i++) {
+    size_t hash = data[i].hash & mask;
+    data[i].next = data[hash].hash_table;
+    data[hash].hash_table = &data[i];
+  }
+}
+
 static FAST_JSON_ERROR_ENUM
 fast_json_add_object_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
 			  const char *name, FAST_JSON_DATA_TYPE value)
 {
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_MALLOC_ERROR;
   FAST_JSON_OBJECT_TYPE *o = object->u.object;
+  unsigned int hash = 0xFFFFFFFFu;
 
+  fast_json_update_crc (&hash, name);
+  hash = hash ^ 0xFFFFFFFFu;
   if (o == NULL) {
     size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
       (FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
@@ -3542,43 +3566,52 @@ fast_json_add_object_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
     o = object->u.object =
       (FAST_JSON_OBJECT_TYPE *) (*json->my_malloc) (size);
     if (o) {
+      size_t i;
+
       o->len = 0;
       o->max = FAST_JSON_INITIAL_SIZE;
+      for (i = 0; i < o->max; i++) {
+	o->data[i].hash_table = NULL;
+      }
     }
   }
   else if ((json->options & FAST_JSON_NO_DUPLICATE_CHECK) == 0) {
-    size_t l;
+    FAST_JSON_NAME_VALUE_TYPE *obj = o->data[hash & (o->max - 1)].hash_table;
 
-    for (l = 0; l < o->len; l++) {
-      if (o->data[l].name[0] == name[0] &&
-	  strcmp (&o->data[l].name[1], &name[1]) == 0) {
-	fast_json_value_free (json, o->data[l].value);
-	o->data[l].value = value;
+    while (obj) {
+      if (obj->name[0] == name[0] && strcmp (&obj->name[1], &name[1]) == 0) {
+	fast_json_value_free (json, obj->value);
+	obj->value = value;
 	retval = FAST_JSON_OK;
 	return retval;
       }
+      obj = obj->next;
     }
   }
   if (o) {
     if (o->len == o->max) {
-      size_t l = o->max ? o->max * 2 : 1;
+      size_t new_max = o->max * 2;
       size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
-	(l - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
+	(new_max - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
+      FAST_JSON_OBJECT_TYPE *no;
 
-      FAST_JSON_OBJECT_TYPE *no =
-	(FAST_JSON_OBJECT_TYPE *) (*json->my_realloc) (o, size);
-
+      no = (FAST_JSON_OBJECT_TYPE *) (*json->my_realloc) (o, size);
       if (no) {
 	o = object->u.object = no;
-	o->max = l;
+	o->max = new_max;
+	fast_json_init_hash (o);
       }
     }
     if (o->len != o->max) {
-      object->used = 1;
-      value->used = 1;
       o->data[o->len].name = fast_json_strdup (json, name);
-      o->data[o->len].value = value;
       if (o->data[o->len].name != NULL) {
+        object->used = 1;
+        value->used = 1;
+        o->data[o->len].value = value;
+	o->data[o->len].hash = hash;
+	hash &= o->max - 1;
+	o->data[o->len].next = o->data[hash].hash_table;
+	o->data[hash].hash_table = &o->data[o->len];
 	o->len++;
 	retval = FAST_JSON_OK;
       }
@@ -3726,16 +3759,17 @@ fast_json_insert_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
       retval = fast_json_add_object_end (json, object, name, value);
       if (retval == FAST_JSON_OK) {
 	size_t i;
-	FAST_JSON_NAME_VALUE_TYPE *data = object->u.object->data;
-	char *save_name = data[object->u.object->len - 1].name;
+	FAST_JSON_OBJECT_TYPE *o = object->u.object;
+	FAST_JSON_NAME_VALUE_TYPE *data = &o->data[0];
+	FAST_JSON_NAME_VALUE_TYPE save_data = data[object->u.object->len - 1];
 
 	object->used = 1;
 	value->used = 1;
 	for (i = object->u.object->len - 1; i > index; i--) {
 	  data[i] = data[i - 1];
 	}
-	data[index].name = save_name;
-	data[index].value = value;
+	data[index] = save_data;
+	fast_json_init_hash (o);
       }
     }
     else {
@@ -3754,7 +3788,8 @@ fast_json_remove_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
   if (json && object && object->type == FAST_JSON_OBJECT &&
       object->u.object && index < object->u.object->len) {
     size_t i;
-    FAST_JSON_NAME_VALUE_TYPE *data = object->u.object->data;
+    FAST_JSON_OBJECT_TYPE *o = object->u.object;
+    FAST_JSON_NAME_VALUE_TYPE *data = &o->data[0];
 
     (*json->my_free) (data[index].name);
     fast_json_value_free (json, data[index].value);
@@ -3762,6 +3797,7 @@ fast_json_remove_object (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
     for (i = index; i < object->u.object->len; i++) {
       data[i] = data[i + 1];
     }
+    fast_json_init_hash (o);
     retval = FAST_JSON_OK;
   }
   return retval;
@@ -3824,13 +3860,17 @@ fast_json_get_object_by_name (FAST_JSON_DATA_TYPE object, const char *name)
     FAST_JSON_OBJECT_TYPE *o = object->u.object;
 
     if (o) {
-      size_t i;
+      FAST_JSON_NAME_VALUE_TYPE *obj;
+      unsigned int hash = 0xFFFFFFFFu;
 
-      for (i = 0; i < o->len; i++) {
-	if (o->data[i].name[0] == name[0] &&
-	    strcmp (&o->data[i].name[1], &name[1]) == 0) {
-	  return (o->data[i].value);
+      fast_json_update_crc (&hash, name);
+      hash = hash ^ 0xFFFFFFFFu;
+      obj = o->data[hash & (o->max - 1)].hash_table;
+      while (obj) {
+	if (obj->name[0] == name[0] && strcmp (&obj->name[1], &name[1]) == 0) {
+	  return (obj->value);
 	}
+	obj = obj->next;
       }
     }
   }
@@ -4041,7 +4081,7 @@ fast_json_update_crc (unsigned int *crc, const char *str)
   unsigned int temp = *crc;
 
   while (*str) {
-    temp = (temp >> 8) ^ fast_json_crctab[(temp & 0xFFu) ^ *str++];
+    temp = (temp >> 8) ^ fast_json_crctab[(temp ^ *str++) & 0xFFu];
   }
   *crc = temp;
 }
