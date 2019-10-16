@@ -140,7 +140,6 @@ struct fast_json_struct
 
 typedef struct fast_json_name_value_struct
 {
-  size_t hash;
   struct fast_json_name_value_struct *next;
   struct fast_json_name_value_struct *hash_table;
   char *name;
@@ -248,7 +247,8 @@ static FAST_JSON_ERROR_ENUM fast_json_add_object_end (FAST_JSON_TYPE json,
 						      const char *name,
 						      FAST_JSON_DATA_TYPE
 						      value);
-static void fast_json_update_crc (unsigned int *crc, const char *str);
+static void fast_json_update_crc64 (uint64_t * crc, const char *str);
+static void fast_json_update_crc32 (unsigned int *crc, const char *str);
 static FAST_JSON_ERROR_ENUM fast_json_parse_crc (FAST_JSON_TYPE json,
 						 unsigned int *crc, int c);
 static FAST_JSON_ERROR_ENUM fast_json_calc_crc_all (FAST_JSON_TYPE json,
@@ -3543,7 +3543,10 @@ fast_json_init_hash (FAST_JSON_OBJECT_TYPE * o)
     data[i].hash_table = NULL;
   }
   for (i = 0; i < o->len; i++) {
-    size_t hash = data[i].hash & mask;
+    uint64_t hash = UINT64_C (0xFFFFFFFFFFFFFFFF);
+
+    fast_json_update_crc64 (&hash, data[i].name);
+    hash = (hash ^ UINT64_C (0xFFFFFFFFFFFFFFFF)) & mask;
     data[i].next = data[hash].hash_table;
     data[hash].hash_table = &data[i];
   }
@@ -3555,10 +3558,10 @@ fast_json_add_object_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
 {
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_MALLOC_ERROR;
   FAST_JSON_OBJECT_TYPE *o = object->u.object;
-  unsigned int hash = 0xFFFFFFFFu;
+  uint64_t hash = UINT64_C (0xFFFFFFFFFFFFFFFF);
 
-  fast_json_update_crc (&hash, name);
-  hash = hash ^ 0xFFFFFFFFu;
+  fast_json_update_crc64 (&hash, name);
+  hash = hash ^ UINT64_C (0xFFFFFFFFFFFFFFFF);
   if (o == NULL) {
     size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
       (FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
@@ -3605,10 +3608,9 @@ fast_json_add_object_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
     if (o->len != o->max) {
       o->data[o->len].name = fast_json_strdup (json, name);
       if (o->data[o->len].name != NULL) {
-        object->used = 1;
-        value->used = 1;
-        o->data[o->len].value = value;
-	o->data[o->len].hash = hash;
+	object->used = 1;
+	value->used = 1;
+	o->data[o->len].value = value;
 	hash &= o->max - 1;
 	o->data[o->len].next = o->data[hash].hash_table;
 	o->data[hash].hash_table = &o->data[o->len];
@@ -3861,10 +3863,10 @@ fast_json_get_object_by_name (FAST_JSON_DATA_TYPE object, const char *name)
 
     if (o) {
       FAST_JSON_NAME_VALUE_TYPE *obj;
-      unsigned int hash = 0xFFFFFFFFu;
+      uint64_t hash = UINT64_C (0xFFFFFFFFFFFFFFFF);
 
-      fast_json_update_crc (&hash, name);
-      hash = hash ^ 0xFFFFFFFFu;
+      fast_json_update_crc64 (&hash, name);
+      hash = hash ^ UINT64_C (0xFFFFFFFFFFFFFFFF);
       obj = o->data[hash & (o->max - 1)].hash_table;
       while (obj) {
 	if (obj->name[0] == name[0] && strcmp (&obj->name[1], &name[1]) == 0) {
@@ -3992,6 +3994,130 @@ main (void)
 {
   unsigned int i;
   unsigned int j;
+  unsigned long crc;
+
+  for (i = 0; i < 256; i++) {
+    crc = (unsigned long) i;
+
+    for (j = 0; j < 8; j++) {
+      crc = crc & 1ul ? 0xC96C5795D7870F42ul ^ (crc >> 1ul) : crc >> 1ul;
+    }
+    printf ("0x%016lX, ", crc);
+    if ((i % 3) == 2) {
+      printf ("\n");
+    }
+  }
+  return 0;
+}
+#endif
+static const uint64_t fast_json_crctab64[256] = {
+  0x0000000000000000, 0xB32E4CBE03A75F6F, 0xF4843657A840A05B,
+  0x47AA7AE9ABE7FF34, 0x7BD0C384FF8F5E33, 0xC8FE8F3AFC28015C,
+  0x8F54F5D357CFFE68, 0x3C7AB96D5468A107, 0xF7A18709FF1EBC66,
+  0x448FCBB7FCB9E309, 0x0325B15E575E1C3D, 0xB00BFDE054F94352,
+  0x8C71448D0091E255, 0x3F5F08330336BD3A, 0x78F572DAA8D1420E,
+  0xCBDB3E64AB761D61, 0x7D9BA13851336649, 0xCEB5ED8652943926,
+  0x891F976FF973C612, 0x3A31DBD1FAD4997D, 0x064B62BCAEBC387A,
+  0xB5652E02AD1B6715, 0xF2CF54EB06FC9821, 0x41E11855055BC74E,
+  0x8A3A2631AE2DDA2F, 0x39146A8FAD8A8540, 0x7EBE1066066D7A74,
+  0xCD905CD805CA251B, 0xF1EAE5B551A2841C, 0x42C4A90B5205DB73,
+  0x056ED3E2F9E22447, 0xB6409F5CFA457B28, 0xFB374270A266CC92,
+  0x48190ECEA1C193FD, 0x0FB374270A266CC9, 0xBC9D3899098133A6,
+  0x80E781F45DE992A1, 0x33C9CD4A5E4ECDCE, 0x7463B7A3F5A932FA,
+  0xC74DFB1DF60E6D95, 0x0C96C5795D7870F4, 0xBFB889C75EDF2F9B,
+  0xF812F32EF538D0AF, 0x4B3CBF90F69F8FC0, 0x774606FDA2F72EC7,
+  0xC4684A43A15071A8, 0x83C230AA0AB78E9C, 0x30EC7C140910D1F3,
+  0x86ACE348F355AADB, 0x3582AFF6F0F2F5B4, 0x7228D51F5B150A80,
+  0xC10699A158B255EF, 0xFD7C20CC0CDAF4E8, 0x4E526C720F7DAB87,
+  0x09F8169BA49A54B3, 0xBAD65A25A73D0BDC, 0x710D64410C4B16BD,
+  0xC22328FF0FEC49D2, 0x85895216A40BB6E6, 0x36A71EA8A7ACE989,
+  0x0ADDA7C5F3C4488E, 0xB9F3EB7BF06317E1, 0xFE5991925B84E8D5,
+  0x4D77DD2C5823B7BA, 0x64B62BCAEBC387A1, 0xD7986774E864D8CE,
+  0x90321D9D438327FA, 0x231C512340247895, 0x1F66E84E144CD992,
+  0xAC48A4F017EB86FD, 0xEBE2DE19BC0C79C9, 0x58CC92A7BFAB26A6,
+  0x9317ACC314DD3BC7, 0x2039E07D177A64A8, 0x67939A94BC9D9B9C,
+  0xD4BDD62ABF3AC4F3, 0xE8C76F47EB5265F4, 0x5BE923F9E8F53A9B,
+  0x1C4359104312C5AF, 0xAF6D15AE40B59AC0, 0x192D8AF2BAF0E1E8,
+  0xAA03C64CB957BE87, 0xEDA9BCA512B041B3, 0x5E87F01B11171EDC,
+  0x62FD4976457FBFDB, 0xD1D305C846D8E0B4, 0x96797F21ED3F1F80,
+  0x2557339FEE9840EF, 0xEE8C0DFB45EE5D8E, 0x5DA24145464902E1,
+  0x1A083BACEDAEFDD5, 0xA9267712EE09A2BA, 0x955CCE7FBA6103BD,
+  0x267282C1B9C65CD2, 0x61D8F8281221A3E6, 0xD2F6B4961186FC89,
+  0x9F8169BA49A54B33, 0x2CAF25044A02145C, 0x6B055FEDE1E5EB68,
+  0xD82B1353E242B407, 0xE451AA3EB62A1500, 0x577FE680B58D4A6F,
+  0x10D59C691E6AB55B, 0xA3FBD0D71DCDEA34, 0x6820EEB3B6BBF755,
+  0xDB0EA20DB51CA83A, 0x9CA4D8E41EFB570E, 0x2F8A945A1D5C0861,
+  0x13F02D374934A966, 0xA0DE61894A93F609, 0xE7741B60E174093D,
+  0x545A57DEE2D35652, 0xE21AC88218962D7A, 0x5134843C1B317215,
+  0x169EFED5B0D68D21, 0xA5B0B26BB371D24E, 0x99CA0B06E7197349,
+  0x2AE447B8E4BE2C26, 0x6D4E3D514F59D312, 0xDE6071EF4CFE8C7D,
+  0x15BB4F8BE788911C, 0xA6950335E42FCE73, 0xE13F79DC4FC83147,
+  0x521135624C6F6E28, 0x6E6B8C0F1807CF2F, 0xDD45C0B11BA09040,
+  0x9AEFBA58B0476F74, 0x29C1F6E6B3E0301B, 0xC96C5795D7870F42,
+  0x7A421B2BD420502D, 0x3DE861C27FC7AF19, 0x8EC62D7C7C60F076,
+  0xB2BC941128085171, 0x0192D8AF2BAF0E1E, 0x4638A2468048F12A,
+  0xF516EEF883EFAE45, 0x3ECDD09C2899B324, 0x8DE39C222B3EEC4B,
+  0xCA49E6CB80D9137F, 0x7967AA75837E4C10, 0x451D1318D716ED17,
+  0xF6335FA6D4B1B278, 0xB199254F7F564D4C, 0x02B769F17CF11223,
+  0xB4F7F6AD86B4690B, 0x07D9BA1385133664, 0x4073C0FA2EF4C950,
+  0xF35D8C442D53963F, 0xCF273529793B3738, 0x7C0979977A9C6857,
+  0x3BA3037ED17B9763, 0x888D4FC0D2DCC80C, 0x435671A479AAD56D,
+  0xF0783D1A7A0D8A02, 0xB7D247F3D1EA7536, 0x04FC0B4DD24D2A59,
+  0x3886B22086258B5E, 0x8BA8FE9E8582D431, 0xCC0284772E652B05,
+  0x7F2CC8C92DC2746A, 0x325B15E575E1C3D0, 0x8175595B76469CBF,
+  0xC6DF23B2DDA1638B, 0x75F16F0CDE063CE4, 0x498BD6618A6E9DE3,
+  0xFAA59ADF89C9C28C, 0xBD0FE036222E3DB8, 0x0E21AC88218962D7,
+  0xC5FA92EC8AFF7FB6, 0x76D4DE52895820D9, 0x317EA4BB22BFDFED,
+  0x8250E80521188082, 0xBE2A516875702185, 0x0D041DD676D77EEA,
+  0x4AAE673FDD3081DE, 0xF9802B81DE97DEB1, 0x4FC0B4DD24D2A599,
+  0xFCEEF8632775FAF6, 0xBB44828A8C9205C2, 0x086ACE348F355AAD,
+  0x34107759DB5DFBAA, 0x873E3BE7D8FAA4C5, 0xC094410E731D5BF1,
+  0x73BA0DB070BA049E, 0xB86133D4DBCC19FF, 0x0B4F7F6AD86B4690,
+  0x4CE50583738CB9A4, 0xFFCB493D702BE6CB, 0xC3B1F050244347CC,
+  0x709FBCEE27E418A3, 0x3735C6078C03E797, 0x841B8AB98FA4B8F8,
+  0xADDA7C5F3C4488E3, 0x1EF430E13FE3D78C, 0x595E4A08940428B8,
+  0xEA7006B697A377D7, 0xD60ABFDBC3CBD6D0, 0x6524F365C06C89BF,
+  0x228E898C6B8B768B, 0x91A0C532682C29E4, 0x5A7BFB56C35A3485,
+  0xE955B7E8C0FD6BEA, 0xAEFFCD016B1A94DE, 0x1DD181BF68BDCBB1,
+  0x21AB38D23CD56AB6, 0x9285746C3F7235D9, 0xD52F0E859495CAED,
+  0x6601423B97329582, 0xD041DD676D77EEAA, 0x636F91D96ED0B1C5,
+  0x24C5EB30C5374EF1, 0x97EBA78EC690119E, 0xAB911EE392F8B099,
+  0x18BF525D915FEFF6, 0x5F1528B43AB810C2, 0xEC3B640A391F4FAD,
+  0x27E05A6E926952CC, 0x94CE16D091CE0DA3, 0xD3646C393A29F297,
+  0x604A2087398EADF8, 0x5C3099EA6DE60CFF, 0xEF1ED5546E415390,
+  0xA8B4AFBDC5A6ACA4, 0x1B9AE303C601F3CB, 0x56ED3E2F9E224471,
+  0xE5C372919D851B1E, 0xA26908783662E42A, 0x114744C635C5BB45,
+  0x2D3DFDAB61AD1A42, 0x9E13B115620A452D, 0xD9B9CBFCC9EDBA19,
+  0x6A978742CA4AE576, 0xA14CB926613CF817, 0x1262F598629BA778,
+  0x55C88F71C97C584C, 0xE6E6C3CFCADB0723, 0xDA9C7AA29EB3A624,
+  0x69B2361C9D14F94B, 0x2E184CF536F3067F, 0x9D36004B35545910,
+  0x2B769F17CF112238, 0x9858D3A9CCB67D57, 0xDFF2A94067518263,
+  0x6CDCE5FE64F6DD0C, 0x50A65C93309E7C0B, 0xE388102D33392364,
+  0xA4226AC498DEDC50, 0x170C267A9B79833F, 0xDCD7181E300F9E5E,
+  0x6FF954A033A8C131, 0x28532E49984F3E05, 0x9B7D62F79BE8616A,
+  0xA707DB9ACF80C06D, 0x14299724CC279F02, 0x5383EDCD67C06036,
+  0xE0ADA17364673F59
+};
+
+static void
+fast_json_update_crc64 (uint64_t * crc, const char *str)
+{
+  uint64_t temp = *crc;
+
+  while (*str) {
+    temp = (temp >> 8) ^ fast_json_crctab64[(temp ^ *str++) & 0xFFu];
+  }
+  *crc = temp;
+}
+
+#if 0
+#include <stdio.h>
+
+int
+main (void)
+{
+  unsigned int i;
+  unsigned int j;
   unsigned int crc;
 
   for (i = 0; i < 256; i++) {
@@ -4008,7 +4134,7 @@ main (void)
   return 0;
 }
 #endif
-static const unsigned int fast_json_crctab[256] = {
+static const unsigned int fast_json_crctab32[256] = {
   0x00000000u, 0x77073096u, 0xEE0E612Cu, 0x990951BAu,
   0x076DC419u, 0x706AF48Fu, 0xE963A535u, 0x9E6495A3u,
   0x0EDB8832u, 0x79DCB8A4u, 0xE0D5E91Eu, 0x97D2D988u,
@@ -4076,12 +4202,12 @@ static const unsigned int fast_json_crctab[256] = {
 };
 
 static void
-fast_json_update_crc (unsigned int *crc, const char *str)
+fast_json_update_crc32 (unsigned int *crc, const char *str)
 {
   unsigned int temp = *crc;
 
   while (*str) {
-    temp = (temp >> 8) ^ fast_json_crctab[(temp ^ *str++) & 0xFFu];
+    temp = (temp >> 8) ^ fast_json_crctab32[(temp ^ *str++) & 0xFFu];
   }
   *crc = temp;
 }
@@ -4101,7 +4227,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
     }
     save = fast_json_ungetc_save (json, c);
     if (strcmp (save, "null") == 0) {
-      fast_json_update_crc (crc, save);
+      fast_json_update_crc32 (crc, save);
     }
     else if ((json->options & FAST_JSON_INF_NAN) &&
 	     strcasecmp (save, "nan") == 0) {
@@ -4119,7 +4245,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	c = 0;
       }
       save = fast_json_ungetc_save (json, c);
-      fast_json_update_crc (crc, save);
+      fast_json_update_crc32 (crc, save);
     }
     else {
       fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
@@ -4132,7 +4258,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
     }
     save = fast_json_ungetc_save (json, c);
     if (strcmp (save, "false") == 0) {
-      fast_json_update_crc (crc, save);
+      fast_json_update_crc32 (crc, save);
     }
     else {
       fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
@@ -4145,7 +4271,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
     }
     save = fast_json_ungetc_save (json, c);
     if (strcmp (save, "true") == 0) {
-      fast_json_update_crc (crc, save);
+      fast_json_update_crc32 (crc, save);
     }
     else {
       fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
@@ -4161,7 +4287,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
     if ((json->options & FAST_JSON_INF_NAN) != 0 &&
 	(strcasecmp (save, "inf") == 0 ||
 	 strcasecmp (save, "infinity") == 0)) {
-      fast_json_update_crc (crc, save);
+      fast_json_update_crc32 (crc, save);
     }
     else {
       fast_json_store_error (json, FAST_JSON_VALUE_ERROR, save);
@@ -4178,7 +4304,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       c = fast_json_getc_save (json);
     }
     save = fast_json_ungetc_save (json, c);
-    fast_json_update_crc (crc, save);
+    fast_json_update_crc32 (crc, save);
     c = fast_json_getc (json);
     if (c != '"') {
       fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
@@ -4241,7 +4367,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	if ((json->options & FAST_JSON_INF_NAN) != 0) {
 	  if (strcasecmp (&json->save[last_n_save], "inf") == 0 ||
 	      strcasecmp (&json->save[last_n_save], "infinity") == 0) {
-	    fast_json_update_crc (crc, save);
+	    fast_json_update_crc32 (crc, save);
 	    break;
 	  }
 	  else if (strcasecmp (&json->save[last_n_save], "nan") == 0) {
@@ -4260,7 +4386,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	      c = 0;
 	    }
 	    save = fast_json_ungetc_save (json, c);
-	    fast_json_update_crc (crc, save);
+	    fast_json_update_crc32 (crc, save);
 	    break;
 	  }
 	}
@@ -4313,7 +4439,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	}
       }
       save = fast_json_ungetc_save (json, c);
-      fast_json_update_crc (crc, save);
+      fast_json_update_crc32 (crc, save);
     }
     break;
   case '[':
@@ -4368,7 +4494,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	c = fast_json_getc_save (json);
       }
       save = fast_json_ungetc_save (json, c);
-      fast_json_update_crc (crc, save);
+      fast_json_update_crc32 (crc, save);
       c = fast_json_getc (json);
       if (c != '"') {
 	fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
