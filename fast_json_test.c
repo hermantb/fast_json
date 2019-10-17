@@ -16,7 +16,7 @@
 #include <unistd.h>
 #include <locale.h>
 #if USE_FAST_CONVERT
-#include "fast_convert/fast_convert.h"
+#include "fast_convert.h"
 #endif
 #include "fast_json.h"
 

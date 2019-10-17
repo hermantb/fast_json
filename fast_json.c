@@ -25,9 +25,13 @@
 #endif
 
 #ifdef __GNUC__
-#define	ALWAYS_INLINE	__attribute ((always_inline)) __inline__
+#define	ALWAYS_INLINE		__attribute ((always_inline)) __inline__
+#define LIKELY(x)               __builtin_expect ((x), 1)
+#define UNLIKELY(x)             __builtin_expect ((x), 0)
 #else
 #define	ALWAYS_INLINE
+#define LIKELY(x)               (x)
+#define UNLIKELY(x)             (x)
 #endif
 
 #define	FAST_JSON_INITIAL_SIZE	(8)	/* must be power of 2 */
@@ -315,7 +319,7 @@ fast_json_strdup (FAST_JSON_TYPE json, const char *str)
   size_t len = strlen (str) + 1;
   void *ret = (*json->my_malloc) (len);
 
-  if (ret) {
+  if (LIKELY (ret != NULL)) {
     memcpy (ret, str, len);
   }
   return (char *) ret;
@@ -382,7 +386,7 @@ fast_json_data_create (FAST_JSON_TYPE json)
   }
   else {
     v = (FAST_JSON_DATA_TYPE) (*json->my_malloc) (sizeof (*v));
-    if (v) {
+    if (LIKELY (v != NULL)) {
       v->index = 0xFFFFFFFFu;
     }
   }
@@ -392,11 +396,11 @@ fast_json_data_create (FAST_JSON_TYPE json)
 static void
 fast_json_data_free (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE ptr)
 {
-  if (ptr) {
+  if (LIKELY (ptr != NULL)) {
     size_t index = ptr->index;
 
     if (ptr->index != 0xFFFFFFFFu) {
-      if (--json->big_malloc[ptr->index].count == 0) {
+      if (UNLIKELY (--json->big_malloc[ptr->index].count == 0)) {
 
 	(*json->my_free) (json->big_malloc[index].data);
 	json->big_malloc[index].count = index;
@@ -438,7 +442,7 @@ fast_json_getc_string (void *user_data)
   int c;
 
   c = json->u_parse.str.string[json->u_parse.str.pos];
-  if (c == '\0') {
+  if (UNLIKELY (c == '\0')) {
     return FAST_JSON_EOF;
   }
   json->u_parse.str.pos++;
@@ -450,7 +454,7 @@ fast_json_getc_string_len (void *user_data)
 {
   FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
 
-  if (json->u_parse.str.pos >= json->u_parse.str.len) {
+  if (UNLIKELY (json->u_parse.str.pos >= json->u_parse.str.len)) {
     return FAST_JSON_EOF;
   }
   return json->u_parse.str.string[json->u_parse.str.pos++] & 0xFFu;
@@ -469,7 +473,7 @@ fast_json_getc_fd (void *user_data)
 {
   FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
 
-  if (json->u_parse.fd.pos >= json->u_parse.fd.len) {
+  if (UNLIKELY (json->u_parse.fd.pos >= json->u_parse.fd.len)) {
     int len;
 
     do {
@@ -493,19 +497,19 @@ fast_json_getc (FAST_JSON_TYPE json)
 {
   int c;
 
-  if (json->last_char) {
+  if (UNLIKELY (json->last_char)) {
     c = json->last_char;
     json->last_char = 0;
   }
   else {
     c = json->getc (json->getc_data);
-    if (c <= 0) {
+    if (UNLIKELY (c <= 0)) {
       return FAST_JSON_EOF;
     }
   }
   json->column += fast_json_utf8_size[c] != 0;
   json->position++;
-  if (c == '\n') {
+  if (UNLIKELY (c == '\n')) {
     json->line++;
     json->last_column = json->column;
     json->column = 0;
@@ -516,8 +520,8 @@ fast_json_getc (FAST_JSON_TYPE json)
 static void
 fast_json_ungetc (FAST_JSON_TYPE json, int c)
 {
-  if (c > 0) {
-    if (c == '\n') {
+  if (LIKELY (c > 0)) {
+    if (UNLIKELY (c == '\n')) {
       json->line--;
       json->column = json->last_column;
     }
@@ -532,8 +536,8 @@ fast_json_getc_save (FAST_JSON_TYPE json)
 {
   int c = fast_json_getc (json);
 
-  if (c > 0) {
-    if (json->n_save + 2 > json->max_save) {
+  if (LIKELY (c > 0)) {
+    if (UNLIKELY (json->n_save + 2 > json->max_save)) {
       size_t new_max = json->max_save + FAST_JSON_BUFFER_SIZE;
       char *new_save;
 
@@ -553,8 +557,8 @@ static void
 fast_json_getc_save_start (FAST_JSON_TYPE json, int c)
 {
   json->n_save = 0;
-  if (c > 0) {
-    if (json->max_save == 0) {
+  if (LIKELY (c > 0)) {
+    if (UNLIKELY (json->max_save == 0)) {
       size_t new_max = FAST_JSON_BUFFER_SIZE;
       char *new_save;
 
@@ -572,9 +576,9 @@ fast_json_getc_save_start (FAST_JSON_TYPE json, int c)
 static char *
 fast_json_ungetc_save (FAST_JSON_TYPE json, int c)
 {
-  if (c > 0) {
+  if (LIKELY (c > 0)) {
     fast_json_ungetc (json, c);
-    if (json->n_save) {
+    if (LIKELY (json->n_save)) {
       json->n_save--;
     }
   }
@@ -593,7 +597,7 @@ fast_json_skip_whitespace (FAST_JSON_TYPE json, int *next)
     while (fast_json_isspace (c)) {
       c = fast_json_getc (json);
     }
-    if (c == '/') {
+    if (UNLIKELY (c == '/')) {
       c = fast_json_getc (json);
       if (c == '*') {
 	c = fast_json_getc (json);
@@ -695,7 +699,7 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
     };
-    if (special1[*ptr & 0xFFu] == 0) {
+    if (LIKELY (special1[*ptr & 0xFFu] == 0)) {
       *ptr2++ = *ptr++;
     }
     else if ((*ptr & 0x80u) != 0) {
@@ -1031,7 +1035,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       double n;
 
       fast_json_getc_save_start (json, c);
-      if (c == '+') {
+      if (UNLIKELY (c == '+')) {
 	if ((json->options & FAST_JSON_INF_NAN) != 0) {
 	  c = fast_json_getc_save (json);
 	}
@@ -1057,7 +1061,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	  }
 	}
       }
-      else if (fast_json_isdigit (c)) {
+      else if (LIKELY (fast_json_isdigit (c))) {
 	do {
 	  c = fast_json_getc_save (json);
 	} while (fast_json_isdigit (c));
@@ -1103,7 +1107,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	json->save[json->n_save - 1] = json->decimal_point;
 	c = fast_json_getc_save (json);
 	integer = 0;
-	if (hex) {
+	if (UNLIKELY (hex)) {
 	  if (fast_json_isxdigit (c)) {
 	    do {
 	      c = fast_json_getc_save (json);
@@ -1700,7 +1704,7 @@ fast_json_skip_whitespace2 (FAST_JSON_TYPE json, const char **buf)
     while (fast_json_isspace (*cp)) {
       cp++;
     }
-    if (*cp == '/') {
+    if (UNLIKELY (*cp == '/')) {
       if (cp[1] == '*') {
 	cp += 2;
 	while (*cp) {
@@ -1883,7 +1887,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       const char *dp = NULL;
 
       save = value;
-      if (*value == '+') {
+      if (UNLIKELY (*value == '+')) {
 	if ((json->options & FAST_JSON_INF_NAN) != 0) {
 	  value++;
 	}
@@ -1909,7 +1913,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	  }
 	}
       }
-      else if (fast_json_isdigit (*value)) {
+      else if (LIKELY (fast_json_isdigit (*value))) {
 	do {
 	  value++;
 	} while (fast_json_isdigit (*value));
@@ -1952,7 +1956,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       if (*value == '.') {
 	dp = value++;
 	integer = 0;
-	if (hex) {
+	if (UNLIKELY (hex)) {
 	  if (fast_json_isxdigit (*value)) {
 	    do {
 	      value++;
@@ -2501,7 +2505,7 @@ fast_json_value_free (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value)
       {
 	FAST_JSON_OBJECT_TYPE *o = value->u.object;
 
-	if (o) {
+	if (LIKELY (o != NULL)) {
 	  size_t i;
 
 	  for (i = 0; i < o->len; i++) {
@@ -2517,7 +2521,7 @@ fast_json_value_free (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE value)
       {
 	FAST_JSON_ARRAY_TYPE *a = value->u.array;
 
-	if (a) {
+	if (LIKELY (a != NULL)) {
 	  size_t i;
 
 	  for (i = 0; i < a->len; i++) {
@@ -2632,7 +2636,7 @@ fast_json_puts_big (FAST_JSON_TYPE json, const char *str, unsigned int len)
 static ALWAYS_INLINE int
 fast_json_puts (FAST_JSON_TYPE json, const char *str, unsigned int len)
 {
-  if (json->puts_len + len <= sizeof (json->puts_buf)) {
+  if (LIKELY (json->puts_len + len <= sizeof (json->puts_buf))) {
     memcpy (json->puts_buf + json->puts_len, str, len);
     json->puts_len += len;
     return 0;
@@ -2681,7 +2685,7 @@ fast_json_print_string_value (FAST_JSON_TYPE json, const char *s)
 	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
       };
 
-      if (special[*s & 0xFFu]) {
+      if (UNLIKELY (special[*s & 0xFFu])) {
 	static const char hex[16] = {
 	  '0', '1', '2', '3', '4', '5', '6', '7',
 	  '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
@@ -2890,7 +2894,7 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
 	  return -1;
 	}
 	o = value->u.object;
-	if (o) {
+	if (LIKELY (o != NULL)) {
 	  size_t i;
 	  FAST_JSON_NAME_VALUE_TYPE *p = NULL;
 	  FAST_JSON_NAME_VALUE_TYPE *d = o->data;
@@ -2938,7 +2942,7 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
 	  return -1;
 	}
 	a = value->u.array;
-	if (a) {
+	if (LIKELY (a != NULL)) {
 	  size_t i;
 
 	  for (i = 0; i < a->len; i++) {
@@ -2961,12 +2965,13 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
     case FAST_JSON_INTEGER:
       {
 	char v[100];
-        unsigned int len;
+	unsigned int len;
 
 #if USE_FAST_CONVERT
 	len = fast_sint64 (value->u.int_value, v);
 #else
-	len = snprintf (v, sizeof (v), "%" FAST_JSON_FMT_INT, value->u.int_value);
+	len =
+	  snprintf (v, sizeof (v), "%" FAST_JSON_FMT_INT, value->u.int_value);
 #endif
 	return fast_json_puts (json, v, len);
       }
@@ -2974,7 +2979,7 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
       {
 	char *cp;
 	char v[100];
-        unsigned int len;
+	unsigned int len;
 
 #if USE_FAST_CONVERT
 	len = fast_dtoa (value->u.double_value, PREC_DBL_NR, v);
@@ -3462,7 +3467,7 @@ fast_json_check_loop (FAST_JSON_DATA_TYPE data, FAST_JSON_DATA_TYPE value)
   if (value->type == FAST_JSON_ARRAY) {
     FAST_JSON_ARRAY_TYPE *a = value->u.array;
 
-    if (a) {
+    if (LIKELY (a != NULL)) {
       size_t i;
 
       for (i = 0; i < a->len; i++) {
@@ -3479,7 +3484,7 @@ fast_json_check_loop (FAST_JSON_DATA_TYPE data, FAST_JSON_DATA_TYPE value)
   else if (value->type == FAST_JSON_OBJECT) {
     FAST_JSON_OBJECT_TYPE *o = value->u.object;
 
-    if (o) {
+    if (LIKELY (o != NULL)) {
       size_t i;
 
       for (i = 0; i < o->len; i++) {
@@ -3503,30 +3508,30 @@ fast_json_add_array_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE array,
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_MALLOC_ERROR;
   FAST_JSON_ARRAY_TYPE *a = array->u.array;
 
-  if (a == NULL) {
+  if (UNLIKELY (a == NULL)) {
     size_t size = sizeof (FAST_JSON_ARRAY_TYPE) +
       (FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_DATA_TYPE);
 
     a = array->u.array = (FAST_JSON_ARRAY_TYPE *) (*json->my_malloc) (size);
-    if (a) {
+    if (LIKELY (a != NULL)) {
       a->len = 0;
       a->max = FAST_JSON_INITIAL_SIZE;
     }
   }
-  if (a) {
-    if (a->len == a->max) {
+  if (LIKELY (a != NULL)) {
+    if (UNLIKELY (a->len == a->max)) {
       size_t l = a->max ? a->max * 2 : 1;
       size_t size = sizeof (FAST_JSON_ARRAY_TYPE) +
 	(l - 1) * sizeof (FAST_JSON_DATA_TYPE);
       FAST_JSON_ARRAY_TYPE *na =
 	(FAST_JSON_ARRAY_TYPE *) (*json->my_realloc) (a, size);
 
-      if (na) {
+      if (LIKELY (na != NULL)) {
 	a = array->u.array = na;
 	a->max = l;
       }
     }
-    if (a->len != a->max) {
+    if (LIKELY (a->len != a->max)) {
       array->used = 1;
       value->used = 1;
       a->values[a->len++] = value;
@@ -3586,13 +3591,13 @@ fast_json_add_object_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
 
   fast_json_update_crc64 (&hash, name);
   hash = hash ^ UINT64_C (0xFFFFFFFFFFFFFFFF);
-  if (o == NULL) {
+  if (UNLIKELY (o == NULL)) {
     size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
       (FAST_JSON_INITIAL_SIZE - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
 
     o = object->u.object =
       (FAST_JSON_OBJECT_TYPE *) (*json->my_malloc) (size);
-    if (o) {
+    if (LIKELY (o != NULL)) {
       size_t i;
 
       o->len = 0;
@@ -3615,21 +3620,21 @@ fast_json_add_object_end (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE object,
       obj = obj->next;
     }
   }
-  if (o) {
-    if (o->len == o->max) {
+  if (LIKELY (o != NULL)) {
+    if (UNLIKELY (o->len == o->max)) {
       size_t new_max = o->max * 2;
       size_t size = sizeof (FAST_JSON_OBJECT_TYPE) +
 	(new_max - 1) * sizeof (FAST_JSON_NAME_VALUE_TYPE);
       FAST_JSON_OBJECT_TYPE *no;
 
       no = (FAST_JSON_OBJECT_TYPE *) (*json->my_realloc) (o, size);
-      if (no) {
+      if (LIKELY (no != NULL)) {
 	o = object->u.object = no;
 	o->max = new_max;
 	fast_json_init_hash (o);
       }
     }
-    if (o->len != o->max) {
+    if (LIKELY (o->len != o->max)) {
       o->data[o->len].name = fast_json_strdup (json, name);
       if (o->data[o->len].name != NULL) {
 	object->used = 1;
@@ -3885,7 +3890,7 @@ fast_json_get_object_by_name (FAST_JSON_DATA_TYPE object, const char *name)
   if (object && object->type == FAST_JSON_OBJECT && name) {
     FAST_JSON_OBJECT_TYPE *o = object->u.object;
 
-    if (o) {
+    if (LIKELY (o != NULL)) {
       FAST_JSON_NAME_VALUE_TYPE *obj;
       uint64_t hash = UINT64_C (0xFFFFFFFFFFFFFFFF);
 
@@ -4422,7 +4427,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	  }
 	}
       }
-      else if (fast_json_isdigit (c)) {
+      else if (LIKELY (fast_json_isdigit (c))) {
 	do {
 	  c = fast_json_getc_save (json);
 	} while (fast_json_isdigit (c));
@@ -4467,7 +4472,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       }
       if (c == '.') {
 	c = fast_json_getc_save (json);
-	if (hex) {
+	if (UNLIKELY (hex)) {
 	  if (fast_json_isxdigit (c)) {
 	    do {
 	      c = fast_json_getc_save (json);
