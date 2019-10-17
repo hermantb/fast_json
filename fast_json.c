@@ -24,6 +24,12 @@
 #include "fast_convert.h"
 #endif
 
+#ifdef __GNUC__
+#define	ALWAYS_INLINE	__attribute ((always_inline)) __inline__
+#else
+#define	ALWAYS_INLINE
+#endif
+
 #define	FAST_JSON_INITIAL_SIZE	(8)	/* must be power of 2 */
 #define	FAST_JSON_BUFFER_SIZE	(BUFSIZ)
 #define	FAST_JSON_BIG_SIZE	(FAST_JSON_BUFFER_SIZE / \
@@ -192,6 +198,7 @@ static int fast_json_getc_string (void *user_data);
 static int fast_json_getc_string_len (void *user_data);
 static int fast_json_getc_file (void *user_data);
 static int fast_json_getc_fd (void *user_date);
+static int fast_json_getc (FAST_JSON_TYPE json);
 static void fast_json_ungetc (FAST_JSON_TYPE json, int c);
 static int fast_json_getc_save (FAST_JSON_TYPE json);
 static void fast_json_getc_save_start (FAST_JSON_TYPE json, int c);
@@ -223,6 +230,8 @@ static int fast_json_puts_file (void *user_data, const char *str,
 				unsigned int len);
 static int fast_json_puts_fd (void *user_data, const char *str,
 			      unsigned int len);
+static int fast_json_puts_big (FAST_JSON_TYPE json, const char *str,
+			       unsigned int len);
 static int fast_json_puts (FAST_JSON_TYPE json, const char *str,
 			   unsigned int len);
 static int fast_json_last_puts (FAST_JSON_TYPE json, const char *str,
@@ -479,7 +488,7 @@ fast_json_getc_fd (void *user_data)
   return json->u_parse.fd.buffer[json->u_parse.fd.pos++] & 0xFFu;
 }
 
-static int
+static ALWAYS_INLINE int
 fast_json_getc (FAST_JSON_TYPE json)
 {
   int c;
@@ -518,7 +527,7 @@ fast_json_ungetc (FAST_JSON_TYPE json, int c)
   }
 }
 
-static int
+static ALWAYS_INLINE int
 fast_json_getc_save (FAST_JSON_TYPE json)
 {
   int c = fast_json_getc (json);
@@ -573,7 +582,7 @@ fast_json_ungetc_save (FAST_JSON_TYPE json, int c)
   return json->save;
 }
 
-static FAST_JSON_ERROR_ENUM
+static ALWAYS_INLINE FAST_JSON_ERROR_ENUM
 fast_json_skip_whitespace (FAST_JSON_TYPE json, int *next)
 {
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_OK;
@@ -878,7 +887,8 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       c = fast_json_getc_save (json);
     }
     save = fast_json_ungetc_save (json, c);
-    if (strcmp (save, "null") == 0) {
+    if (json->n_save == 4 &&
+	save[1] == 'u' && save[2] == 'l' && save[3] == 'l') {
       v = fast_json_create_null (json);
     }
     else if ((json->options & FAST_JSON_INF_NAN) != 0 &&
@@ -910,7 +920,9 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       c = fast_json_getc_save (json);
     }
     save = fast_json_ungetc_save (json, c);
-    if (strcmp (save, "false") == 0) {
+    if (json->n_save == 5 &&
+	save[1] == 'a' && save[2] == 'l' && save[3] == 's' &&
+	save[4] == 'e') {
       v = fast_json_create_false (json);
     }
     else {
@@ -923,7 +935,8 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       c = fast_json_getc_save (json);
     }
     save = fast_json_ungetc_save (json, c);
-    if (strcmp (save, "true") == 0) {
+    if (json->n_save == 4 &&
+	save[1] == 'r' && save[2] == 'u' && save[3] == 'e') {
       v = fast_json_create_true (json);
     }
     else {
@@ -993,7 +1006,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	}
 	else {
 	  v->is_str = 1;
-	  strcpy (v->u.i_string_value, out);
+	  memcpy (v->u.i_string_value, out, json->n_save + 1);
 	}
       }
     }
@@ -1731,7 +1744,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
   switch (*value) {
   case 'n':			/* FALLTHRU */
   case 'N':
-    if (strncmp (value, "null", strlen ("null")) == 0) {
+    if (value[1] == 'u' && value[2] == 'l' && value[3] == 'l') {
       value += strlen ("null");
       v = fast_json_create_null (json);
     }
@@ -1762,7 +1775,8 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
     }
     break;
   case 'f':
-    if (strncmp (value, "false", strlen ("false")) == 0) {
+    if (value[1] == 'a' && value[2] == 'l' && value[3] == 's' &&
+	value[4] == 'e') {
       value += strlen ("false");
       v = fast_json_create_false (json);
     }
@@ -1772,7 +1786,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
     }
     break;
   case 't':
-    if (strncmp (value, "true", strlen ("true")) == 0) {
+    if (value[1] == 'r' && value[2] == 'u' && value[3] == 'e') {
       value += strlen ("true");
       v = fast_json_create_true (json);
     }
@@ -1832,7 +1846,6 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	}
 	return NULL;
       }
-      value++;
       v = fast_json_data_create (json);
       if (v) {
 	v->type = FAST_JSON_STRING;
@@ -1843,9 +1856,10 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	}
 	else {
 	  v->is_str = 1;
-	  strcpy (v->u.i_string_value, out);
+	  memcpy (v->u.i_string_value, out, (value - save) + 1);
 	}
       }
+      value++;
     }
     break;
   case '+':			/* FALLTHRU */
@@ -2593,32 +2607,37 @@ fast_json_puts_fd (void *user_data, const char *str, unsigned int len)
 }
 
 static int
+fast_json_puts_big (FAST_JSON_TYPE json, const char *str, unsigned int len)
+{
+  while (len) {
+    unsigned int size = sizeof (json->puts_buf) - json->puts_len;
+
+    if (size > len) {
+      size = len;
+    }
+    memcpy (json->puts_buf + json->puts_len, str, size);
+    json->puts_len += size;
+    str += size;
+    len -= size;
+    if (json->puts_len == sizeof (json->puts_buf)) {
+      if ((*json->puts) (json->puts_data, json->puts_buf, json->puts_len)) {
+	return -1;
+      }
+      json->puts_len = 0;
+    }
+  }
+  return 0;
+}
+
+static ALWAYS_INLINE int
 fast_json_puts (FAST_JSON_TYPE json, const char *str, unsigned int len)
 {
   if (json->puts_len + len <= sizeof (json->puts_buf)) {
     memcpy (json->puts_buf + json->puts_len, str, len);
     json->puts_len += len;
+    return 0;
   }
-  else {
-    while (len) {
-      unsigned int size = sizeof (json->puts_buf) - json->puts_len;
-
-      if (size > len) {
-	size = len;
-      }
-      memcpy (json->puts_buf + json->puts_len, str, size);
-      json->puts_len += size;
-      str += size;
-      len -= size;
-      if (json->puts_len == sizeof (json->puts_buf)) {
-	if ((*json->puts) (json->puts_data, json->puts_buf, json->puts_len)) {
-	  return -1;
-	}
-	json->puts_len = 0;
-      }
-    }
-  }
-  return 0;
+  return fast_json_puts_big (json, str, len);
 }
 
 static int
@@ -2942,23 +2961,25 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
     case FAST_JSON_INTEGER:
       {
 	char v[100];
+        unsigned int len;
 
 #if USE_FAST_CONVERT
-	fast_sint64 (value->u.int_value, v);
+	len = fast_sint64 (value->u.int_value, v);
 #else
-	snprintf (v, sizeof (v), "%" FAST_JSON_FMT_INT, value->u.int_value);
+	len = snprintf (v, sizeof (v), "%" FAST_JSON_FMT_INT, value->u.int_value);
 #endif
-	return fast_json_puts (json, v, strlen (v));
+	return fast_json_puts (json, v, len);
       }
     case FAST_JSON_DOUBLE:
       {
 	char *cp;
 	char v[100];
+        unsigned int len;
 
 #if USE_FAST_CONVERT
-	fast_dtoa (value->u.double_value, PREC_DBL_NR, v);
+	len = fast_dtoa (value->u.double_value, PREC_DBL_NR, v);
 #else
-	snprintf (v, sizeof (v), "%.17g", value->u.double_value);
+	len = snprintf (v, sizeof (v), "%.17g", value->u.double_value);
 #endif
 	cp = v;
 	if (*cp == '-' || *cp == '+') {
@@ -2971,9 +2992,11 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
 	  *cp = '.';
 	}
 	else if (*cp == '\0') {
-	  strcpy (cp, ".0");
+	  *cp++ = '.';
+	  *cp = '0';
+	  len += 2;
 	}
-	return fast_json_puts (json, v, strlen (v));
+	return fast_json_puts (json, v, len);
       }
     case FAST_JSON_STRING:
       return fast_json_print_string_value (json,
@@ -2981,10 +3004,11 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
 					   ? &value->u.i_string_value[0]
 					   : value->u.string_value);
     case FAST_JSON_BOOLEAN:
-      {
-	const char *v = value->u.boolean_value ? "true" : "false";
-
-	return fast_json_puts (json, v, strlen (v));
+      if (value->u.boolean_value) {
+	return fast_json_puts (json, "true", strlen ("true"));
+      }
+      else {
+	return fast_json_puts (json, "false", strlen ("false"));
       }
     case FAST_JSON_NULL:
       return fast_json_puts (json, "null", strlen ("null"));
@@ -3248,7 +3272,7 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
       new_value = fast_json_strdup (json, value);
     }
     else {
-      strcpy (str, value);
+      memcpy (str, value, len + 1);
     }
     if (new_value) {
       if (fast_json_check_string (json, value, value + len, new_value) ==
@@ -3263,7 +3287,7 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
 	  }
 	  else {
 	    item->is_str = 1;
-	    strcpy (item->u.i_string_value, new_value);
+	    memcpy (item->u.i_string_value, new_value, len + 1);
 	  }
 	}
 	else if (new_value != &str[0]) {
@@ -3948,7 +3972,7 @@ fast_json_set_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE data,
       new_value = fast_json_strdup (json, value);
     }
     else {
-      new_value = strcpy (str, value);
+      new_value = memcpy (str, value, len + 1);
     }
     if (new_value) {
       if (fast_json_check_string (json, value, value + len, new_value) ==
@@ -3962,7 +3986,7 @@ fast_json_set_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE data,
 	}
 	else {
 	  data->is_str = 1;
-	  strcpy (data->u.i_string_value, new_value);
+	  memcpy (data->u.i_string_value, new_value, len + 1);
 	}
 	retval = FAST_JSON_OK;
       }
@@ -4268,7 +4292,8 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       c = fast_json_getc_save (json);
     }
     save = fast_json_ungetc_save (json, c);
-    if (strcmp (save, "null") == 0) {
+    if (json->n_save == 4 &&
+	save[1] == 'u' && save[2] == 'l' && save[3] == 'l') {
       fast_json_update_crc32 (crc, save);
     }
     else if ((json->options & FAST_JSON_INF_NAN) &&
@@ -4299,7 +4324,9 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       c = fast_json_getc_save (json);
     }
     save = fast_json_ungetc_save (json, c);
-    if (strcmp (save, "false") == 0) {
+    if (json->n_save == 5 &&
+	save[1] == 'a' && save[2] == 'l' && save[3] == 's' &&
+	save[4] == 'e') {
       fast_json_update_crc32 (crc, save);
     }
     else {
@@ -4312,7 +4339,8 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       c = fast_json_getc_save (json);
     }
     save = fast_json_ungetc_save (json, c);
-    if (strcmp (save, "true") == 0) {
+    if (json->n_save == 4 &&
+	save[1] == 'r' && save[2] == 'u' && save[3] == 'e') {
       fast_json_update_crc32 (crc, save);
     }
     else {
