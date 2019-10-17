@@ -172,6 +172,58 @@ receiver (void *data)
 }
 #endif
 
+static uint64_t n_object = 0;
+static uint64_t n_array = 0;
+static uint64_t n_integer = 0;
+static uint64_t n_double = 0;
+static uint64_t n_string = 0;
+static uint64_t n_boolean = 0;
+static uint64_t n_null = 0;
+
+static void
+count_items (FAST_JSON_DATA_TYPE v)
+{
+  switch (fast_json_get_type (v)) {
+  case FAST_JSON_OBJECT:
+    {
+      size_t i;
+      size_t n = fast_json_get_object_size (v);
+
+      n_object++;
+      for (i = 0; i < n; i++) {
+	count_items (fast_json_get_object_data (v, i));
+      }
+    }
+    break;
+  case FAST_JSON_ARRAY:
+    {
+      size_t i;
+      size_t n = fast_json_get_array_size (v);
+
+      n_array++;
+      for (i = 0; i < n; i++) {
+	count_items (fast_json_get_array_data (v, i));
+      }
+    }
+    break;
+  case FAST_JSON_INTEGER:
+    n_integer++;
+    break;
+  case FAST_JSON_DOUBLE:
+    n_double++;
+    break;
+  case FAST_JSON_STRING:
+    n_string++;
+    break;
+  case FAST_JSON_BOOLEAN:
+    n_boolean++;
+    break;
+  case FAST_JSON_NULL:
+    n_null++;
+    break;
+  }
+}
+
 static double
 get_time (void)
 {
@@ -195,6 +247,7 @@ main (int argc, char **argv)
   FAST_JSON_TYPE json;
   FAST_JSON_DATA_TYPE o;
   char *s;
+  double total;
   double len;
   double start;
   double end;
@@ -385,6 +438,16 @@ main (int argc, char **argv)
     return 0;
   }
 
+  count_items (o);
+  printf
+    ("obj: %lu, arr %lu, int %lu, dbl %lu, str %lu, bool %lu, null %lu\n",
+     (unsigned long) n_object, (unsigned long) n_array,
+     (unsigned long) n_integer, (unsigned long) n_double,
+     (unsigned long) n_string, (unsigned long) n_boolean,
+     (unsigned long) n_null);
+  total =
+    n_object + n_array + n_integer + n_double + n_string + n_boolean + n_null;
+
   s = fast_json_print_string (json, o, print_nice);
   len = strlen (s);
   fast_json_release_print_value (json, s);
@@ -396,8 +459,9 @@ main (int argc, char **argv)
       fast_json_release_print_value (json, s);
     }
     end = get_time ();
-    printf ("print     %12.9f s, %10.0f chars/s\n",
-	    (end - start) / count / 1e9, len * count * 1e9 / (end - start));
+    printf ("print     %12.9f s, %10.0f chars/s, %10.0f items/s\n",
+	    (end - start) / count / 1e9, len * count * 1e9 / (end - start),
+	    total * count * 1e9 / (end - start));
   }
   if (parse_time) {
     s = fast_json_print_string (json, o, print_nice);
@@ -432,8 +496,9 @@ main (int argc, char **argv)
     }
     fast_json_release_print_value (json, s);
     end = get_time ();
-    printf ("parse     %12.9f s, %10.0f chars/s\n",
-	    (end - start) / count / 1e9, len * count * 1e9 / (end - start));
+    printf ("parse     %12.9f s, %10.0f chars/s, %10.0f items/s\n",
+	    (end - start) / count / 1e9, len * count * 1e9 / (end - start),
+	    total * count * 1e9 / (end - start));
   }
 
 #ifndef WIN
@@ -448,8 +513,9 @@ main (int argc, char **argv)
     pthread_join (st, NULL);
     pthread_join (rt, NULL);
     end = get_time ();
-    printf ("stream:   %12.9f s, %10.0f chars/s\n",
-	    (end - start) / count / 1e9, len * count * 1e9 / (end - start));
+    printf ("stream:   %12.9f s, %10.0f chars/s, %10.0f items/s\n",
+	    (end - start) / count / 1e9, len * count * 1e9 / (end - start),
+	    total * count * 1e9 / (end - start));
     close (sockets[0]);
     close (sockets[1]);
   }
