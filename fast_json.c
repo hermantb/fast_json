@@ -1155,7 +1155,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 
 	errno = 0;
 #if USE_FAST_CONVERT
-	int_value = fast_strtos64 (save, &end);
+	int_value = fast_strtos64 (save, &end, 0);
 #else
 #if __WORDSIZE == 64
 	int_value = strtol (save, &end, 0);
@@ -2003,7 +2003,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 
 	errno = 0;
 #if USE_FAST_CONVERT
-	int_value = fast_strtos64 (save, &end);
+	int_value = fast_strtos64 (save, &end, 0);
 #else
 #if __WORDSIZE == 64
 	int_value = strtol (save, &end, 0);
