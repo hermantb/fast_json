@@ -17,6 +17,8 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#else
+#include <windows.h>
 #endif
 #include "fast_json.h"
 
@@ -98,8 +100,9 @@ static unsigned int reuse = 0;
 static unsigned int options = 0;
 static unsigned int print_nice = 0;
 
-#ifndef WIN
 static int sockets[2];
+
+/* Windows does not support read/write on socket so use recv/send */
 
 static void *
 sender (void *data)
@@ -120,14 +123,51 @@ sender (void *data)
 		 fast_json_get_type (v) != FAST_JSON_ARRAY &&
 		 fast_json_get_type (v) != FAST_JSON_STRING);
   for (i = 0; i < count; i++) {
+#ifndef WIN
     fast_json_print_fd (json, v, sockets[0], print_nice);
+#else
+    char *cp = fast_json_print_string (json, v, print_nice);
+
+    send(sockets[0], cp, strlen (cp), 0);
+    fast_json_release_print_value (json, cp);
+#endif
     if (add_newline) {
+#ifndef WIN
       write (sockets[0], "\n", 1);
+#else
+      send (sockets[0], "\n", 1, 0);
+#endif
     }
   }
   fast_json_free (json);
   return NULL;
 }
+
+#ifdef WIN
+static int u_pos = 0;
+static int u_len = 0;
+static char u_buffer[BUFSIZ];
+
+static int
+user_getc (void *user_data)
+{
+  if (u_pos >= u_len) {
+    int len;
+    int fd = *(int *) user_data;
+
+    do {
+      len = recv (fd, u_buffer, sizeof (u_buffer), 0);
+    } while (len < 0 && GetLastError() == WSAEWOULDBLOCK);
+
+    if (len <= 0) {
+      return -1;
+    }
+    u_len = len;
+    u_pos = 0;
+  }
+  return u_buffer[u_pos++] & 0xFFu;
+}
+#endif
 
 static void *
 receiver (void *data)
@@ -146,7 +186,11 @@ receiver (void *data)
   fast_json_options (json, options | FAST_JSON_NO_EOF_CHECK);
   for (i = 0; i < count; i++) {
     if (i == 0) {
+#ifndef WIN
       n = fast_json_parse_fd (json, sockets[1]);
+#else
+      n = fast_json_parse_user (json, user_getc, &sockets[1]);
+#endif
     }
     else {
       n = fast_json_parse_next (json);
@@ -170,6 +214,63 @@ receiver (void *data)
   fast_json_free (json);
   return NULL;
 }
+
+#ifdef WIN
+int
+mysocketpair (int sp[2])
+{
+  struct usa {
+    union
+    {
+      struct sockaddr sa;
+      struct sockaddr_in sin;
+    }
+    u;
+  } sa;
+  int sock, ret = -1;
+  int len = sizeof (sa.u.sa);
+
+  (void) memset (&sa, 0, sizeof (sa));
+  sa.u.sin.sin_family = AF_INET;
+  sa.u.sin.sin_port = htons (0);
+  sa.u.sin.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
+
+  if ((sock = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+    fprintf (stderr, "mysocketpair: socket(): %d\n", (int) GetLastError());
+  }
+  else if (bind (sock, &sa.u.sa, len) != 0) {
+    fprintf (stderr, "mysocketpair: bind(): %d\n", (int) GetLastError());
+    (void) closesocket (sock);
+  }
+  else if (listen (sock, 1) != 0) {
+    fprintf (stderr, "mysocketpair: listen(): %d\n", (int) GetLastError());
+    (void) closesocket (sock);
+  }
+  else if (getsockname (sock, &sa.u.sa, &len) != 0) {
+    fprintf (stderr, "mysocketpair: getsockname(): %d\n", (int) GetLastError());
+    (void) closesocket (sock);
+  }
+  else if ((sp[0] = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+    fprintf (stderr, "mysocketpair: socket(): %d\n", (int) GetLastError());
+    (void) closesocket (sock);
+  }
+  else if (connect (sp[0], &sa.u.sa, len) != 0) {
+    fprintf (stderr, "mysocketpair: connect(): %d\n", (int) GetLastError());
+    (void) closesocket (sock);
+    (void) closesocket (sp[0]);
+  }
+  else if ((sp[1] = accept (sock, &sa.u.sa, &len)) == -1) {
+    fprintf (stderr, "mysocketpair: accept(): %d\n", (int) GetLastError());
+    (void) closesocket (sock);
+    (void) closesocket (sp[0]);
+  }
+  else {
+    /* Success */
+    ret = 0;
+    (void) closesocket (sock);
+  }
+
+  return (ret);}
 #endif
 
 static uint64_t n_object = 0;
@@ -255,9 +356,7 @@ main (int argc, char **argv)
   unsigned int fast_string = 0;
   unsigned int parse_time = 0;
   unsigned int print_time = 0;
-#ifndef WIN
   unsigned int stream_time = 0;
-#endif
   unsigned int print = 0;
   unsigned int print_help = 0;
   char *name = NULL;
@@ -275,11 +374,9 @@ main (int argc, char **argv)
     else if (strcmp (argv[i], "--parse_time") == 0) {
       parse_time = 1;
     }
-#ifndef WIN
     else if (strcmp (argv[i], "--stream_time") == 0) {
       stream_time = 1;
     }
-#endif
     else if (strcmp (argv[i], "--hex") == 0) {
       options |= FAST_JSON_ALLOW_OCT_HEX;
     }
@@ -291,6 +388,9 @@ main (int argc, char **argv)
     }
     else if (strcmp (argv[i], "--no_duplicate") == 0) {
       options |= FAST_JSON_NO_DUPLICATE_CHECK;
+    }
+    else if (strcmp (argv[i], "--no_comment") == 0) {
+      options |= FAST_JSON_NO_COMMENT;
     }
     else if (strcmp (argv[i], "--check_alloc") == 0) {
       check_alloc = 1;
@@ -322,13 +422,12 @@ main (int argc, char **argv)
     printf ("--reuse=n         Use object reuse\n");
     printf ("--print_time:     Run print time test\n");
     printf ("--parse_time:     Run parse time test\n");
-#ifndef WIN
     printf ("--stream_time:    Run stream time test\n");
-#endif
     printf ("--hex:            Allow oct and hex numbers\n");
     printf ("--infnan:         Allow inf and nan\n");
     printf ("--big:            Use big allocs\n");
     printf ("--no_duplicate:   Do not check duplicate object names\n");
+    printf ("--no_comment:     Do not allow comments\n");
     printf ("--check_alloc:    Check allocs\n");
     printf ("--fast_string:    Use fast string parser\n");
     printf ("--print:          Print result\n");
@@ -336,16 +435,11 @@ main (int argc, char **argv)
     printf ("--unicode_escape: Print unicode escape instead of utf8\n");
     exit (0);
   }
-  if (print_time == 0 && parse_time == 0
-#ifndef WIN
-      && stream_time == 0
-#endif
+  if (print_time == 0 && parse_time == 0 && stream_time == 0
     ) {
     print_time = 1;
     parse_time = 1;
-#ifndef WIN
     stream_time = 1;
-#endif
   }
   if (count == 0) {
     count = 1000;
@@ -485,13 +579,10 @@ main (int argc, char **argv)
       }
       fast_json_value_free (json, o);
     }
-#ifndef WIN
     if (stream_time) {
       o = fast_json_parse_string2 (json, s);
     }
-    else
-#endif
-    {
+    else {
       o = NULL;
     }
     fast_json_release_print_value (json, s);
@@ -501,8 +592,8 @@ main (int argc, char **argv)
 	    total * count * 1e9 / (end - start));
   }
 
-#ifndef WIN
   if (stream_time) {
+#ifndef WIN
     pthread_t rt;
     pthread_t st;
 
@@ -518,8 +609,36 @@ main (int argc, char **argv)
 	    total * count * 1e9 / (end - start));
     close (sockets[0]);
     close (sockets[1]);
-  }
+#else
+    HANDLE rt;
+    HANDLE st;
+    int err;
+    WSADATA wsaData;
+
+    /* Initialize Winsock */
+    err = WSAStartup(MAKEWORD(2,2), &wsaData);
+    if (err != 0) {
+      fprintf (stderr, "WSAStartup(): %d\n", (int) GetLastError());
+      exit (1);
+    }
+
+    mysocketpair (&sockets[0]);
+    start = get_time ();
+    st = CreateThread(NULL, 8192, (LPTHREAD_START_ROUTINE) sender, o, 0, NULL);
+    rt = CreateThread(NULL, 8192, (LPTHREAD_START_ROUTINE) receiver, o, 0, NULL);
+    WaitForSingleObject(st, INFINITE);
+    WaitForSingleObject(rt, INFINITE);
+    CloseHandle(st);
+    CloseHandle(rt);
+    end = get_time ();
+    printf ("stream:   %12.9f s, %10.0f chars/s, %10.0f items/s\n",
+	    (end - start) / count / 1e9, len * count * 1e9 / (end - start),
+	    total * count * 1e9 / (end - start));
+    closesocket (sockets[0]);
+    closesocket (sockets[1]);
+    WSACleanup();
 #endif
+  }
 
   fast_json_value_free (json, o);
   fast_json_free (json);

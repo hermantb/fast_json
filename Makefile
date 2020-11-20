@@ -1,6 +1,6 @@
 OPTIONS = -g -O3 -Wall
 CC = gcc
-WIN_GCC = i686-w64-mingw32-gcc
+WIN_GCC = x86_64-w64-mingw32-gcc
 
 # -fsanitize=address,pointer-compare,pointer-subtract,leak,undefined
 # -fsanitize-address-use-after-scope
@@ -11,7 +11,7 @@ WIN_GCC = i686-w64-mingw32-gcc
 
 all: fast_json_benchmark fast_json_test libfast_json.a libfast_json.so
 
-allf: all fast_json_benchmarkf fast_json_testf
+allf: fast_json_benchmarkf fast_json_testf
 
 fast_json_benchmark: fast_json_benchmark.c libfast_json.a
 	${CC} ${OPTIONS} fast_json_benchmark.c libfast_json.a -o fast_json_benchmark -lpthread
@@ -78,19 +78,21 @@ random.json: fast_json_random
 fast_json_random: fast_json_random.c libfast_json.a
 	${CC} ${OPTIONS} fast_json_random.c libfast_json.a -o fast_json_random
 
-allwin: fast_json_test.exe fast_json_benchmark.exe fast_json_testf.exe fast_json_benchmarkf.exe
+allwin: fast_json_test.exe fast_json_benchmark.exe
+
+allwinf: fast_json_testf.exe fast_json_benchmarkf.exe
 
 fast_json_test.exe: fast_json.c fast_json_test.c
 	$(WIN_GCC) ${OPTIONS} -DWIN fast_json.c fast_json_test.c -o fast_json_test.exe
 
 fast_json_benchmark.exe: fast_json.c fast_json_benchmark.c
-	$(WIN_GCC) ${OPTIONS} -DWIN fast_json.c fast_json_benchmark.c -o fast_json_benchmark.exe
+	$(WIN_GCC) ${OPTIONS} -DWIN fast_json.c fast_json_benchmark.c -o fast_json_benchmark.exe -lws2_32
 
-fast_json_testf.exe: fast_json.c fast_json_test.c
+fast_json_testf.exe: fast_json.c fast_json_test.c fast_convert
 	$(WIN_GCC) ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT -DWIN fast_json.c fast_json_test.c fast_convert/fast_convert.c -o fast_json_testf.exe
 
 fast_json_benchmarkf.exe: fast_json.c fast_json_benchmark.c fast_convert
-	$(WIN_GCC) ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT -DWIN fast_json.c fast_json_benchmark.c fast_convert/fast_convert.c -o fast_json_benchmarkf.exe
+	$(WIN_GCC) ${OPTIONS} -Ifast_convert -DUSE_FAST_CONVERT -DWIN fast_json.c fast_json_benchmark.c fast_convert/fast_convert.c -o fast_json_benchmarkf.exe -lws2_32
 
 doc: fast_json.h README.md
 	doxygen

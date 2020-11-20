@@ -25,13 +25,21 @@
 
 static void
 parser_check_error (FAST_JSON_TYPE json, const char *str,
-		    FAST_JSON_ERROR_ENUM error, unsigned int line,
+		    FAST_JSON_ERROR_ENUM error,
+		    unsigned int line, unsigned int line2,
 		    const char *error_str, const char *error_str2)
 {
   FAST_JSON_DATA_TYPE v;
 
   v = fast_json_parse_string (json, str);
-  if (v != NULL) {
+  if (error == FAST_JSON_OK) {
+    if (v == NULL) {
+      fprintf (stderr, "Expected no error: %s\n", str);
+      exit (1);
+    }
+    fast_json_value_free (json, v);
+  }
+  else if (v != NULL) {
     fprintf (stderr, "Unexpected value: %s\n",
 	     fast_json_print_string (json, v, 1));
     exit (1);
@@ -54,7 +62,14 @@ parser_check_error (FAST_JSON_TYPE json, const char *str,
     exit (1);
   }
   v = fast_json_parse_string2 (json, str);
-  if (v != NULL) {
+  if (error == FAST_JSON_OK) {
+    if (v == NULL) {
+      fprintf (stderr, "Expected no error: %s\n", str);
+      exit (1);
+    }
+    fast_json_value_free (json, v);
+  }
+  else if (v != NULL) {
     fprintf (stderr, "Unexpected value: %s\n",
 	     fast_json_print_string (json, v, 1));
     exit (1);
@@ -65,7 +80,7 @@ parser_check_error (FAST_JSON_TYPE json, const char *str,
 	     fast_json_error_str (fast_json_parser_error (json)));
     exit (1);
   }
-  if (fast_json_parser_line (json) != line) {
+  if (fast_json_parser_line (json) != line2) {
     fprintf (stderr, "Unexpected line: expected %u, received %lu\n",
 	     line, (unsigned long) fast_json_parser_line (json));
     exit (1);
@@ -267,27 +282,29 @@ main (void)
 	     (unsigned long) fast_json_parser_position (json));
     exit (1);
   }
-  parser_check_error (json, "\n\n\n\n\n      -", FAST_JSON_NUMBER_ERROR, 6,
+  parser_check_error (json, "\n\n\n\n\n      -", FAST_JSON_NUMBER_ERROR, 6, 6,
 		      "-", "-");
-  parser_check_error (json, "\"\\ujjjj\"", FAST_JSON_UNICODE_ESCAPE_ERROR, 1,
+  parser_check_error (json, "\"\\ujjjj\"", FAST_JSON_UNICODE_ESCAPE_ERROR, 1, 1,
 		      "jjjj", "\\ujjjj\"");
-  parser_check_error (json, "{ [", FAST_JSON_STRING_START_ERROR, 1, "", "");
-  parser_check_error (json, "{\"a :", FAST_JSON_STRING_END_ERROR, 1, "a :",
+  parser_check_error (json, "{ [", FAST_JSON_STRING_START_ERROR, 1, 1, "", "");
+  parser_check_error (json, "{\"a :", FAST_JSON_STRING_END_ERROR, 1, 1, "a :",
 		      "a ");
-  parser_check_error (json, "[ 0", FAST_JSON_ARRAY_END_ERROR, 1, "", "");
-  parser_check_error (json, "{ \"a\" ", FAST_JSON_OBJECT_SEPERATOR_ERROR, 1,
+  parser_check_error (json, "[ 0", FAST_JSON_ARRAY_END_ERROR, 1, 1, "", "");
+  parser_check_error (json, "{ \"a\" ", FAST_JSON_OBJECT_SEPERATOR_ERROR, 1, 1,
 		      "", "");
-  parser_check_error (json, "{\"a\" : 0", FAST_JSON_OBJECT_END_ERROR, 1, "",
+  parser_check_error (json, "{\"a\" : 0", FAST_JSON_OBJECT_END_ERROR, 1, 1, "",
 		      "");
-  parser_check_error (json, "\"a\" : 0", FAST_JSON_OBJECT_END_ERROR, 1, "",
+  parser_check_error (json, "\"a\" : 0", FAST_JSON_OBJECT_END_ERROR, 1, 1, "",
 		      "");
-  parser_check_error (json, "v", FAST_JSON_VALUE_ERROR, 1, "v", "v");
-  parser_check_error (json, "fail", FAST_JSON_VALUE_ERROR, 1, "fail", "fail");
-  parser_check_error (json, "tail", FAST_JSON_VALUE_ERROR, 1, "tail", "tail");
-  parser_check_error (json, "/test", FAST_JSON_COMMENT_ERROR, 1, "/t",
+  parser_check_error (json, "v", FAST_JSON_VALUE_ERROR, 1, 1, "v", "v");
+  parser_check_error (json, "fail", FAST_JSON_VALUE_ERROR, 1, 1, "fail",
+                      "fail");
+  parser_check_error (json, "tail", FAST_JSON_VALUE_ERROR, 1, 1, "tail",
+                      "tail");
+  parser_check_error (json, "/test", FAST_JSON_COMMENT_ERROR, 1, 1, "/t",
 		      "/test");
-  parser_check_error (json, "0.", FAST_JSON_NUMBER_ERROR, 1, "0.", "0.");
-  parser_check_error (json, "0e", FAST_JSON_NUMBER_ERROR, 1, "0e", "0e");
+  parser_check_error (json, "0.", FAST_JSON_NUMBER_ERROR, 1, 1, "0.", "0.");
+  parser_check_error (json, "0e", FAST_JSON_NUMBER_ERROR, 1, 1, "0e", "0e");
 
   tst_error (fast_json_error_str (FAST_JSON_OK), "OK");
   tst_error (fast_json_error_str (FAST_JSON_MALLOC_ERROR), "Malloc error");
@@ -324,23 +341,23 @@ main (void)
 
   /* extra math tests */
   fast_json_options (json, 0);
-  parser_check_error (json, "+1", FAST_JSON_NUMBER_ERROR, 1, "+", "+1");
-  parser_check_error (json, "+inf", FAST_JSON_NUMBER_ERROR, 1, "+", "+inf");
-  parser_check_error (json, "-inf", FAST_JSON_NUMBER_ERROR, 1, "-inf",
+  parser_check_error (json, "+1", FAST_JSON_NUMBER_ERROR, 1, 1, "+", "+1");
+  parser_check_error (json, "+inf", FAST_JSON_NUMBER_ERROR, 1, 1, "+", "+inf");
+  parser_check_error (json, "-inf", FAST_JSON_NUMBER_ERROR, 1, 1, "-inf",
 		      "-inf");
-  parser_check_error (json, "infinity", FAST_JSON_VALUE_ERROR, 1, "infinity",
+  parser_check_error (json, "infinity", FAST_JSON_VALUE_ERROR, 1, 1, "infinity",
 		      "infinity");
-  parser_check_error (json, "nan", FAST_JSON_VALUE_ERROR, 1, "nan", "nan");
-  parser_check_error (json, "+nan", FAST_JSON_NUMBER_ERROR, 1, "+", "+nan");
-  parser_check_error (json, "-nan", FAST_JSON_NUMBER_ERROR, 1, "-nan",
+  parser_check_error (json, "nan", FAST_JSON_VALUE_ERROR, 1, 1, "nan", "nan");
+  parser_check_error (json, "+nan", FAST_JSON_NUMBER_ERROR, 1, 1, "+", "+nan");
+  parser_check_error (json, "-nan", FAST_JSON_NUMBER_ERROR, 1, 1, "-nan",
 		      "-nan");
-  parser_check_error (json, "nan(123)", FAST_JSON_VALUE_ERROR, 1, "nan",
+  parser_check_error (json, "nan(123)", FAST_JSON_VALUE_ERROR, 1, 1, "nan",
 		      "nan(123)");
 
   fast_json_options (json, FAST_JSON_INF_NAN);
-  parser_check_error (json, "nan(123", FAST_JSON_NUMBER_ERROR, 1, "nan(123",
+  parser_check_error (json, "nan(123", FAST_JSON_NUMBER_ERROR, 1, 1, "nan(123",
 		      "nan(123");
-  parser_check_error (json, "+nan(123", FAST_JSON_NUMBER_ERROR, 1, "+nan(123",
+  parser_check_error (json, "+nan(123", FAST_JSON_NUMBER_ERROR, 1, 1, "+nan(123",
 		      "+nan(123");
 
   v = fast_json_parse_string (json, "+1");
@@ -1753,6 +1770,16 @@ main (void)
   }
   fast_json_value_free (json, n);
   free (cp);
+
+  parser_check_error (json, "[ /* */ ]", FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "[ //\n]", FAST_JSON_OK, 2, 1, "", "");
+  fast_json_options (json, FAST_JSON_NO_COMMENT);
+  parser_check_error (json, "[ /* */ ]", FAST_JSON_VALUE_ERROR, 1, 1,
+		      "/", "/* */ ");
+  parser_check_error (json, "[ //\n]", FAST_JSON_VALUE_ERROR, 1, 2,
+		      "/", "//\n");
+
+  fast_json_options (json, 0);
 
 #ifndef WIN
   setlocale (LC_ALL, "nl_NL.UTF-8");

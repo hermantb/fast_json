@@ -538,7 +538,8 @@ fast_json_getc_save (FAST_JSON_TYPE json)
 
   if (LIKELY (c > 0)) {
     if (UNLIKELY (json->n_save + 2 > json->max_save)) {
-      size_t new_max = json->max_save + FAST_JSON_BUFFER_SIZE;
+      size_t new_max =
+        json->max_save ? json->max_save * 2 : FAST_JSON_BUFFER_SIZE;
       char *new_save;
 
       new_save = (char *) json->my_realloc (json->save, new_max);
@@ -597,7 +598,8 @@ fast_json_skip_whitespace (FAST_JSON_TYPE json, int *next)
     while (fast_json_isspace (c)) {
       c = fast_json_getc (json);
     }
-    if (UNLIKELY (c == '/')) {
+    if (UNLIKELY (c == '/') &&
+        LIKELY ((json->options & FAST_JSON_NO_COMMENT) == 0)) {
       c = fast_json_getc (json);
       if (c == '*') {
 	c = fast_json_getc (json);
@@ -1680,9 +1682,6 @@ fast_json_store_error2 (FAST_JSON_TYPE json, FAST_JSON_ERROR_ENUM error,
     rp++;
   }
   s = json->u_parse.json_str;
-  json->line = 1;
-  json->column = 0;
-  json->position = 0;
   while (s != cp) {
     json->position++;
     json->column += fast_json_utf8_size[*s & 0xFFu] != 0;
@@ -1704,7 +1703,8 @@ fast_json_skip_whitespace2 (FAST_JSON_TYPE json, const char **buf)
     while (fast_json_isspace (*cp)) {
       cp++;
     }
-    if (UNLIKELY (*cp == '/')) {
+    if (UNLIKELY (*cp == '/') &&
+        LIKELY ((json->options & FAST_JSON_NO_COMMENT) == 0)) {
       if (cp[1] == '*') {
 	cp += 2;
 	while (*cp) {
@@ -2558,11 +2558,14 @@ static int
 fast_json_puts_string (void *user_data, const char *str, unsigned int len)
 {
   FAST_JSON_TYPE json = (FAST_JSON_TYPE) user_data;
+  size_t new_len = json->u_print.buf.len + len;
 
-  if ((json->u_print.buf.len + len) > json->u_print.buf.max) {
-    size_t new_max = json->u_print.buf.max +
-      ((len + (FAST_JSON_BUFFER_SIZE - 1)) /
-       FAST_JSON_BUFFER_SIZE) * FAST_JSON_BUFFER_SIZE;
+  if (new_len > json->u_print.buf.max) {
+    size_t new_max = new_len > json->u_print.buf.max * 2
+      ?  (new_len > FAST_JSON_BUFFER_SIZE
+          ? (len + (FAST_JSON_BUFFER_SIZE - 1)) / FAST_JSON_BUFFER_SIZE
+          : FAST_JSON_BUFFER_SIZE)
+      : json->u_print.buf.max * 2;
     char *new_txt;
 
     new_txt = (char *) (*json->my_realloc) (json->u_print.buf.txt, new_max);
@@ -2573,7 +2576,7 @@ fast_json_puts_string (void *user_data, const char *str, unsigned int len)
     json->u_print.buf.txt = new_txt;
   }
   memcpy (json->u_print.buf.txt + json->u_print.buf.len, str, len);
-  json->u_print.buf.len += len;
+  json->u_print.buf.len = new_len;
   return 0;
 }
 
@@ -3995,7 +3998,7 @@ fast_json_set_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE data,
 	}
 	retval = FAST_JSON_OK;
       }
-      else {
+      else if (len >= sizeof (str)) {
 	(*json->my_free) (new_value);
       }
     }

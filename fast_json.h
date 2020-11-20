@@ -159,6 +159,9 @@ extern "C"
 /** Do not reject duplicate object names */
 #define	FAST_JSON_NO_DUPLICATE_CHECK	(0x100)
 
+/** Reject comments */
+#define	FAST_JSON_NO_COMMENT		(0x200)
+
 /** Json value type */
   typedef enum fast_json_value_enum
   {
@@ -429,6 +432,8 @@ extern "C"
  * \b Description
  *
  * Parse a string to json type. This is a faster version.
+ * The column, line and postion are only set in case of an error or
+ * if FAST_JSON_NO_EOF_CHECK is set.
  *
  * \param json Json object from \ref fast_json_create.
  * \param json_str String to parse.

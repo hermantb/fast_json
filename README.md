@@ -22,6 +22,7 @@ The large benchmark runs with different options wich will be explained later.
 The documentation (doxygen) can be geneted with 'make doc'.
 If you want to clean things up you can do 'make clean'.
 If you want to remove also the downloaded git repositories you can do 'make realclean'.
+For windows executable you can do 'make allwin' or 'make allwinf'.
 </pre>
 
 If you want to use this library in your project you can include the header file '\#include \<fast\_json.h\>' and the compile with -lfast\_json (and optional -lfast\_convert for faster print and scan functions).
@@ -34,6 +35,7 @@ If you want to use this library in your project you can include the header file 
  * Real numbers are 64 bits IEEE doubles. There is special support for inf and nan and hex floating point.
  * The maximum nesting depth is tested for 10000 (See testcode). Perhaps larger values work. If you really need that much nesting you probably should redesign your json data. Also the stack size can be increaded with ulimit.
  * Objects will never be sorted. Order of object keys is always preserved.
+ * By default comments are allowed. This can be disable by setting FAST_JSON_NO_COMMENT.
 
 ## Special options.
 
@@ -48,6 +50,7 @@ There are several special options with this library.
  * FAST_JSON_BIG_ALLOC			Use big malloc's for json objects. This may require more memory but is faster.
  * FAST_JSON_PRINT_UNICODE_ESCAPE	Print unicode escape characters instead of UTF8.
  * FAST_JSON_NO_DUPLICATE_CHECK		Do not reject duplicate object names.
+ * FAST_JSON_NO_COMMENT			Do not allow comments (/* ... */ and //...)
 
 ## API Documentation.
 
