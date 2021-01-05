@@ -392,6 +392,9 @@ main (int argc, char **argv)
     else if (strcmp (argv[i], "--no_comment") == 0) {
       options |= FAST_JSON_NO_COMMENT;
     }
+    else if (strcmp (argv[i], "--allow_json5") == 0) {
+      options |= FAST_JSON_ALLOW_JSON5;
+    }
     else if (strcmp (argv[i], "--check_alloc") == 0) {
       check_alloc = 1;
     }
@@ -428,6 +431,7 @@ main (int argc, char **argv)
     printf ("--big:            Use big allocs\n");
     printf ("--no_duplicate:   Do not check duplicate object names\n");
     printf ("--no_comment:     Do not allow comments\n");
+    printf ("--allow_json5:    Allow json5\n");
     printf ("--check_alloc:    Check allocs\n");
     printf ("--fast_string:    Use fast string parser\n");
     printf ("--print:          Print result\n");

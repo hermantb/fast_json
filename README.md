@@ -51,6 +51,7 @@ There are several special options with this library.
  * FAST_JSON_PRINT_UNICODE_ESCAPE	Print unicode escape characters instead of UTF8.
  * FAST_JSON_NO_DUPLICATE_CHECK		Do not reject duplicate object names.
  * FAST_JSON_NO_COMMENT			Do not allow comments (/* ... */ and //...)
+ * FAST_JSON_ALLOW_JSON5		Allow json5 (sets FAST_JSON_INF_NAN, FAST_JSON_ALLOW_OCT_HEX and removes FAST_JSON_NO_COMMENT)
 
 ## API Documentation.
 
@@ -81,6 +82,8 @@ Options:
 --infnan:         Allow inf and nan
 --big:            Use big allocs
 --no_duplicate:   Do not check duplicate object names
+--no_comment:     Do not allow comments
+--allow_json5:    Allow json5
 --check_alloc:    Check allocs
 --fast_string:    Use fast string parser
 --print:          Print result

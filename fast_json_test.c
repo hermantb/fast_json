@@ -51,7 +51,7 @@ parser_check_error (FAST_JSON_TYPE json, const char *str,
     exit (1);
   }
   if (fast_json_parser_line (json) != line) {
-    fprintf (stderr, "Unexpected line: expected %u, received %lu\n",
+    fprintf (stderr, "Unexpected line1: expected %u, received %lu\n",
 	     line, (unsigned long) fast_json_parser_line (json));
     exit (1);
   }
@@ -81,7 +81,7 @@ parser_check_error (FAST_JSON_TYPE json, const char *str,
     exit (1);
   }
   if (fast_json_parser_line (json) != line2) {
-    fprintf (stderr, "Unexpected line: expected %u, received %lu\n",
+    fprintf (stderr, "Unexpected line2: expected %u, received %lu\n",
 	     line, (unsigned long) fast_json_parser_line (json));
     exit (1);
   }
@@ -1342,7 +1342,7 @@ main (void)
   fast_json_options (json, FAST_JSON_INF_NAN);
   e = fast_json_calc_crc_string (json, "{\"name\": \"abc\"}", &i);
   if (e != FAST_JSON_OK || i != 0x22721824) {
-    fprintf (stderr, "Wrong sumcheck\n");
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x22721824);
     exit (1);
   }
   e =
@@ -1350,7 +1350,7 @@ main (void)
 			       "[null, nan, nan(123), false, inf, infinity ]",
 			       &i);
   if (e != FAST_JSON_OK || i != 0x03623a1f) {
-    fprintf (stderr, "Wrong sumcheck\n");
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x03623a1f);
     exit (1);
   }
   e =
@@ -1358,20 +1358,20 @@ main (void)
 			       "[+1, 0, 123, -nan, -nan(123), -inf, -infinity ]",
 			       &i);
   if (e != FAST_JSON_OK || i != 0xd443c028) {
-    fprintf (stderr, "Wrong sumcheck\n");
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0xd443c028);
     exit (1);
   }
   e =
     fast_json_calc_crc_string (json, "[12.34, 12.34e+3, true, [], {} ]", &i);
   if (e != FAST_JSON_OK || i != 0x423becf1) {
-    fprintf (stderr, "Wrong sumcheck\n");
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x423becf1);
     exit (1);
   }
 
   fast_json_options (json, FAST_JSON_ALLOW_OCT_HEX);
   e = fast_json_calc_crc_string (json, "[ 0x3, 0Xd, 0xf.fp7, 0123 ]", &i);
   if (e != FAST_JSON_OK || i != 0x2baf1ec8) {
-    fprintf (stderr, "Wrong sumcheck\n");
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x2baf1ec8);
     exit (1);
   }
 
@@ -1781,7 +1781,115 @@ main (void)
 
   fast_json_options (json, 0);
 
-#ifndef WIN
+  fast_json_options (json, FAST_JSON_ALLOW_JSON5);
+  parser_check_error (json,
+                      "{ \f\v\302\240\342\200\250\342\200\251\357\273\277  }",
+		      FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ unquoted\f: 'single quote' }",
+		      FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ single\v: 'use \"double\" quotes' }",
+		      FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ line\302\240: 'linebreak \\\ntest' }",
+		      FAST_JSON_OK, 2, 1, "", "");
+  parser_check_error (json, "{ hex\342\200\250: 0x1234 }",
+		      FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ lead\342\200\251: .1234 }",
+		      FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ trail\357\273\277: 1234. }",
+		      FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ pos: +1 }", FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ trailcomma: 1, }", FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ arr: [ 1, ] }", FAST_JSON_OK, 1, 1, "", "");
+  parser_check_error (json, "{ str: \"\\x61\\\r\\x00\\\r\n\\x5c\\x22\\\n\\xab\\0\" }", FAST_JSON_OK, 3, 1, "", "");
+  parser_check_error (json, "{ str: \"test\342\200\250test1\342\200\251test2\" }", FAST_JSON_OK, 1, 1, "", "");
+  cp = "{ \302\241 : 1, \342\200\247 : 2, \342\201\246 : 3, \357\273\276 : 4, "
+       " \356\273\276 : 5, \357\274\275 : 6 }";
+  n = fast_json_parse_string (json, cp);
+  if (n == NULL) {
+    fprintf (stderr, "utf name error. %s\n",
+	     fast_json_error_str (fast_json_parser_error (json)));
+    exit (1);
+  }
+  v = fast_json_get_object_by_name (n, "\302\241");
+  if (v == NULL) {
+    fprintf (stderr, "utf name error.\n");
+    exit (1);
+  }
+  v = fast_json_get_object_by_name (n, "\342\200\247");
+  if (v == NULL) {
+    fprintf (stderr, "utf name error.\n");
+    exit (1);
+  }
+  v = fast_json_get_object_by_name (n, "\342\201\246");
+  if (v == NULL) {
+    fprintf (stderr, "utf name error.\n");
+    exit (1);
+  }
+  v = fast_json_get_object_by_name (n, "\357\273\276");
+  if (v == NULL) {
+    fprintf (stderr, "utf name error.\n");
+    exit (1);
+  }
+  v = fast_json_get_object_by_name (n, "\357\274\275");
+  if (v == NULL) {
+    fprintf (stderr, "utf name error.\n");
+    exit (1);
+  }
+  fast_json_value_free (json, n);
+  e = fast_json_calc_crc_string
+        (json, "{ \f\v\302\240\342\200\250\342\200\251\357\273\277  }", &i);
+  if (e != FAST_JSON_OK  || i != 0) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ unquoted\f: 'single quote' }", &i);
+  if (e != FAST_JSON_OK  || i != 0x24a754d6) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x24a754d6);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ single\v: 'use \"double\" quotes' }", &i);
+  if (e != FAST_JSON_OK  || i != 0xfd645041) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0xfd645041);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ line\302\240: 'linebreak \\\ntest' }", &i);
+  if (e != FAST_JSON_OK  || i != 0x553a38dc) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x553a38dc);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ hex\342\200\250: 0x1234 }", &i);
+  if (e != FAST_JSON_OK  || i != 0x3141949d) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x3141949d);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ lead\342\200\251: .1234 }", &i);
+  if (e != FAST_JSON_OK  || i != 0xbea76c06) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0xbea76c06);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ trail\357\273\277: 1234. }", &i);
+  if (e != FAST_JSON_OK  || i != 0x3896c418) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x3896c418);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ pos: +1 }", &i);
+  if (e != FAST_JSON_OK  || i != 0x2dacdbdd) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x2dacdbdd);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ trailcomma: 1, }", &i);
+  if (e != FAST_JSON_OK  || i != 0x2e137dc7) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0x2e137dc7);
+    exit (1);
+  }
+  e = fast_json_calc_crc_string (json, "{ arr: [ 1, ] }", &i);
+  if (e != FAST_JSON_OK  || i != 0xb97ce80a) {
+    fprintf (stderr, "Wrong sumcheck 0x%x 0x%x\n", i, 0xb97ce80a);
+    exit (1);
+  }
+  fast_json_options (json, 0);
+
+#if !defined(WIN) && !defined(__TINYC__)
   setlocale (LC_ALL, "nl_NL.UTF-8");
   localeconv ();		/* will normally be called in parser */
 #if USE_FAST_CONVERT

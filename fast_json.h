@@ -162,6 +162,9 @@ extern "C"
 /** Reject comments */
 #define	FAST_JSON_NO_COMMENT		(0x200)
 
+/** Allow json5 */
+#define	FAST_JSON_ALLOW_JSON5		(0x400)
+
 /** Json value type */
   typedef enum fast_json_value_enum
   {

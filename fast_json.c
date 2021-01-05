@@ -24,6 +24,10 @@
 #include "fast_convert.h"
 #endif
 
+#ifdef __attribute__
+#undef __attribute__
+#endif
+
 #ifdef __GNUC__
 #define	ALWAYS_INLINE		__attribute ((always_inline)) __inline__
 #define LIKELY(x)               __builtin_expect ((x), 1)
@@ -81,6 +85,9 @@
 				 ((c) >= 'A' && (c) <= 'Z'))
 #define	fast_json_isspace(c)	((c) == ' ' || (c) == '\t' || \
 				 (c) == '\n' || (c) == '\r')
+#define	fast_json5_isspace(c)	((c) == ' ' || (c) == '\t' || \
+				 (c) == '\n' || (c) == '\r' || \
+			         (c) == '\f' || (c) == '\v')
 
 typedef struct fast_json_big_struct
 {
@@ -130,6 +137,7 @@ struct fast_json_struct
     } buf;
   } u_print;
   int last_char;
+  int last_char2;
   unsigned int puts_len;
   char puts_buf[FAST_JSON_BUFFER_SIZE];
   size_t n_save;
@@ -209,11 +217,13 @@ static void fast_json_getc_save_start (FAST_JSON_TYPE json, int c);
 static char *fast_json_ungetc_save (FAST_JSON_TYPE json, int c);
 static FAST_JSON_ERROR_ENUM fast_json_skip_whitespace (FAST_JSON_TYPE json,
 						       int *next);
-static unsigned int fast_json_hex4 (FAST_JSON_TYPE json, const char **buf);
+static unsigned int fast_json_hex (FAST_JSON_TYPE json, const char **buf,
+				   unsigned int n);
 static FAST_JSON_ERROR_ENUM fast_json_check_string (FAST_JSON_TYPE json,
 						    const char *save,
 						    const char *end,
-						    char *out);
+						    char *out,
+						    int sep);
 static FAST_JSON_DATA_TYPE fast_json_parse_value (FAST_JSON_TYPE json, int c);
 static FAST_JSON_DATA_TYPE fast_json_parse_all (FAST_JSON_TYPE json,
 						unsigned int next);
@@ -285,6 +295,25 @@ static const char fast_json_utf8_size[256] = {
   2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
   3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
   4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+static const char fast_json5_space[256] = {
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
 static double
@@ -498,8 +527,14 @@ fast_json_getc (FAST_JSON_TYPE json)
   int c;
 
   if (UNLIKELY (json->last_char)) {
-    c = json->last_char;
-    json->last_char = 0;
+    if (json->last_char2) {
+      c = json->last_char2;
+      json->last_char2 = 0;
+    }
+    else {
+      c = json->last_char;
+      json->last_char = 0;
+    }
   }
   else {
     c = json->getc (json->getc_data);
@@ -521,13 +556,19 @@ static void
 fast_json_ungetc (FAST_JSON_TYPE json, int c)
 {
   if (LIKELY (c > 0)) {
-    if (UNLIKELY (c == '\n')) {
-      json->line--;
-      json->column = json->last_column;
+    if (json->last_char) {
+      json->last_char2 = c;
+      json->position--;
     }
-    json->column -= fast_json_utf8_size[c] != 0;
-    json->position--;
-    json->last_char = c;
+    else {
+      if (UNLIKELY (c == '\n')) {
+        json->line--;
+        json->column = json->last_column;
+      }
+      json->column -= fast_json_utf8_size[c] != 0;
+      json->position--;
+      json->last_char = c;
+    }
   }
 }
 
@@ -595,8 +636,77 @@ fast_json_skip_whitespace (FAST_JSON_TYPE json, int *next)
   for (;;) {
     int c = fast_json_getc (json);
 
-    while (fast_json_isspace (c)) {
-      c = fast_json_getc (json);
+    if ((json->options & FAST_JSON_ALLOW_JSON5)) {
+      for (;;) {
+        if (fast_json5_space[c & 0xff] == 0) {
+	  break;
+        }
+        if (fast_json5_isspace (c)) {
+          c = fast_json_getc (json);
+        }
+        else if (c == 0xc2) {
+          c = fast_json_getc (json);
+          if (c == 0xa0) { /* Non-breaking space */
+            c = fast_json_getc (json);
+          }
+          else {
+	    fast_json_ungetc (json, c);
+	    c = 0xc2;
+            break;
+          }
+        }
+        else if (c == 0xe2) {
+          c = fast_json_getc (json);
+          if (c == 0x80) {
+            c = fast_json_getc (json);
+            if (c == 0xa8) { /* Line separator */
+	      c = fast_json_getc (json);
+            }
+            else if (c == 0xa9) { /* Paragraph separator */
+	      c = fast_json_getc (json);
+            }
+            else {
+	      fast_json_ungetc (json, c);
+	      fast_json_ungetc (json, 0x80);
+	      c = 0xe2;
+              break;
+            }
+          }
+          else {
+	    fast_json_ungetc (json, c);
+	    c = 0xe2;
+            break;
+          }
+        }
+        else if (c == 0xef) {
+          c = fast_json_getc (json);
+          if (c == 0xbb) {
+            c = fast_json_getc (json);
+            if (c == 0xbf) { /* Byte order mark */
+	      c = fast_json_getc (json);
+            }
+            else {
+	      fast_json_ungetc (json, c);
+	      fast_json_ungetc (json, 0xbb);
+	      c = 0xef;
+              break;
+            }
+          }
+          else {
+	    fast_json_ungetc (json, c);
+	    c = 0xef;
+            break;
+          }
+        }
+        else {
+	  break;
+        }
+      }
+    }
+    else {
+      while (fast_json_isspace (c)) {
+        c = fast_json_getc (json);
+      }
     }
     if (UNLIKELY (c == '/') &&
         LIKELY ((json->options & FAST_JSON_NO_COMMENT) == 0)) {
@@ -644,13 +754,13 @@ fast_json_skip_whitespace (FAST_JSON_TYPE json, int *next)
 }
 
 static unsigned int
-fast_json_hex4 (FAST_JSON_TYPE json, const char **buf)
+fast_json_hex (FAST_JSON_TYPE json, const char **buf, unsigned int n)
 {
   unsigned int i;
   unsigned int h = 0;
   const char *str = *buf;
 
-  for (i = 0; i < 4; i++) {
+  for (i = 0; i < n; i++) {
     h = h << 4;
     if (*str >= '0' && *str <= '9') {
       h += (*str) - '0';
@@ -673,7 +783,7 @@ fast_json_hex4 (FAST_JSON_TYPE json, const char **buf)
 
 static FAST_JSON_ERROR_ENUM
 fast_json_check_string (FAST_JSON_TYPE json, const char *save,
-			const char *end, char *out)
+			const char *end, char *out, int sep)
 {
   const char *ptr;
   const char *save_ptr;
@@ -686,7 +796,7 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
     static const char special1[256] = {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      0, 0, '"', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, '"', 0, 0, 0, 0, '\'', 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '\\', 0, 0, 0,
@@ -790,7 +900,7 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
       else if (*ptr == 'u') {
 	save_ptr = ptr - 1;
 	ptr++;
-	uc = fast_json_hex4 (json, &ptr);
+	uc = fast_json_hex (json, &ptr, 4);
 	if (uc == 0xFFFFFFFFu) {
 	  return json->error;
 	}
@@ -799,7 +909,7 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
 	    unsigned int uc2;
 	    ptr += 2;
 
-	    uc2 = fast_json_hex4 (json, &ptr);
+	    uc2 = fast_json_hex (json, &ptr, 4);
 	    if (uc2 == 0xFFFFFFFFu) {
 	      return json->error;
 	    }
@@ -857,18 +967,85 @@ fast_json_check_string (FAST_JSON_TYPE json, const char *save,
 	  return FAST_JSON_UNICODE_ERROR;
 	}
       }
-      else if (*ptr == '\\' || *ptr == '"') {
+      else if ((json->options & FAST_JSON_ALLOW_JSON5) && *ptr == 'x') {
+        ptr++;
+	uc = fast_json_hex (json, &ptr, 2);
+	if (uc == 0xFFFFFFFFu) {
+	  return json->error;
+	}
+	if (uc < 0x80u) {
+	  if (uc == 0) {
+	    *ptr2++ = '\\';
+	    *ptr2++ = 'u';
+	    *ptr2++ = '0';
+	    *ptr2++ = '0';
+	    *ptr2++ = '0';
+	    *ptr2++ = '0';
+	  }
+	  else {
+	    if (uc == '\\' || uc == '"') {
+	      *ptr2++ = '\\';
+	    }
+	    *ptr2++ = uc;
+	  }
+	}
+	else {
+	  *ptr2++ = ((uc >> 6) & 0x1Fu) | 0xC0u;
+	  *ptr2++ = ((uc >> 0) & 0x3Fu) | 0x80u;
+	}
+      }
+      else if (*ptr == '\\' || *ptr == sep) {
 	*ptr2++ = '\\';
 	*ptr2++ = *ptr++;
       }
+      else if ((json->options & FAST_JSON_ALLOW_JSON5) &&
+               fast_json_isalpha (*ptr)) {
+	*ptr2++ = *ptr++;
+      }
+      else if ((json->options & FAST_JSON_ALLOW_JSON5) && *ptr == '0') {
+	ptr++;
+	*ptr2++ = '\\';
+	*ptr2++ = 'u';
+	*ptr2++ = '0';
+	*ptr2++ = '0';
+	*ptr2++ = '0';
+	*ptr2++ = '0';
+      }
       else {
-	fast_json_store_error (json, FAST_JSON_ESCAPE_CHARACTER_ERROR, ptr);
-	return FAST_JSON_ESCAPE_CHARACTER_ERROR;
+	const unsigned char *uc = (const unsigned char *) ptr;
+
+	if ((json->options & FAST_JSON_ALLOW_JSON5) &&
+            (*uc == '\n' ||
+             *uc == '\r' ||
+	     (*uc == '\r' && uc[1] == '\n') ||
+             (*uc == 0xe2 && uc[1] == 0x80 &&
+	      (uc[2] == 0xa8 || uc[2] == 0xa9)))) {
+          if (*uc == '\r' && uc[1] == '\n') {
+	    ptr += 2;
+          }
+          else if (*uc == 0xe2) {
+	    ptr += 3;
+	  }
+	  else {
+            ptr++;
+	  }
+        }
+        else {
+	  fast_json_store_error (json, FAST_JSON_ESCAPE_CHARACTER_ERROR, ptr);
+	  return FAST_JSON_ESCAPE_CHARACTER_ERROR;
+	}
       }
     }
-    else if (*ptr == '"') {
-      fast_json_store_error (json, FAST_JSON_ESCAPE_CHARACTER_ERROR, ptr);
-      return FAST_JSON_CONTROL_CHARACTER_ERROR;
+    else if (*ptr == '"' || *ptr == '\'') {
+      if (((json->options & FAST_JSON_ALLOW_JSON5) == 0 && *ptr == '"') ||
+          ((json->options & FAST_JSON_ALLOW_JSON5) && *ptr == sep)) {
+        fast_json_store_error (json, FAST_JSON_ESCAPE_CHARACTER_ERROR, ptr);
+        return FAST_JSON_CONTROL_CHARACTER_ERROR;
+      }
+      if (*ptr == '\"') {
+	*ptr2++ = '\\';
+      }
+      *ptr2++ = *ptr++;
     }
     else {
       fast_json_store_error (json, FAST_JSON_CONTROL_CHARACTER_ERROR, ptr);
@@ -966,28 +1143,33 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       return NULL;
     }
     break;
+  case '\'':
   case '"':
     {
       char str[8];
       char *out = &str[0];
+      int sep = c;
+      int nq = 0;
 
       c = fast_json_getc (json);
       fast_json_getc_save_start (json, c);
-      while (c > 0 && c != '"') {
+      while (c > 0 && c != sep) {
+        nq += (c == '"');
 	if (c == '\\') {
-	  fast_json_getc_save (json);
+	  c = fast_json_getc_save (json);
+	  nq += c == 'x' ? 2 : (c == '0' ? 4 : 0);
 	}
 	c = fast_json_getc_save (json);
       }
       save = fast_json_ungetc_save (json, c);
-      if (json->n_save >= sizeof (str)) {
-	out = (char *) (*json->my_malloc) (json->n_save + 1);
+      if (json->n_save + nq >= sizeof (str)) {
+	out = (char *) (*json->my_malloc) (json->n_save + nq + 1);
 	if (out == NULL) {
 	  json->error = FAST_JSON_MALLOC_ERROR;
 	  return NULL;
 	}
       }
-      if (fast_json_check_string (json, save, save + json->n_save, out) !=
+      if (fast_json_check_string (json, save, save + json->n_save, out, sep) !=
 	  FAST_JSON_OK) {
 	if (out != &str[0]) {
 	  (*json->my_free) (out);
@@ -995,7 +1177,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	return NULL;
       }
       c = fast_json_getc (json);
-      if (c != '"') {
+      if (c != sep) {
 	fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
 	if (out != &str[0]) {
 	  (*json->my_free) (out);
@@ -1017,6 +1199,13 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       }
     }
     break;
+  case '.':
+    if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
+      save = fast_json_ungetc_save (json, 0);
+      fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
+      return NULL;
+    }
+    /* FALLTHRU */
   case '+':			/* FALLTHRU */
   case '-':			/* FALLTHRU */
   case '0':			/* FALLTHRU */
@@ -1033,6 +1222,7 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       unsigned int integer = 1;
       unsigned int hex = 0;
       unsigned int sign = 0;
+      unsigned int ndigit = 0;
       char *end;
       double n;
 
@@ -1047,17 +1237,20 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	c = fast_json_getc_save (json);
       }
       if (c == '0') {
+	ndigit++;
 	c = fast_json_getc_save (json);
 	if ((json->options & FAST_JSON_ALLOW_OCT_HEX) != 0) {
 	  if (c == 'x' || c == 'X') {
 	    hex = 1;
 	    c = fast_json_getc_save (json);
 	    while (fast_json_isxdigit (c)) {
+	      ndigit++;
 	      c = fast_json_getc_save (json);
 	    }
 	  }
 	  else {
 	    while (c >= '0' && c <= '7') {
+	      ndigit++;
 	      c = fast_json_getc_save (json);
 	    }
 	  }
@@ -1065,8 +1258,11 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       }
       else if (LIKELY (fast_json_isdigit (c))) {
 	do {
+	  ndigit++;
 	  c = fast_json_getc_save (json);
 	} while (fast_json_isdigit (c));
+      }
+      else if ((json->options & FAST_JSON_ALLOW_JSON5) && c == '.') {
       }
       else {
 	size_t last_n_save = json->n_save > 0 ? json->n_save - 1 : 0;
@@ -1112,10 +1308,11 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	if (UNLIKELY (hex)) {
 	  if (fast_json_isxdigit (c)) {
 	    do {
+	      ndigit++;
 	      c = fast_json_getc_save (json);
 	    } while (fast_json_isxdigit (c));
 	  }
-	  else {
+	  else if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
 	    save = fast_json_ungetc_save (json, 0);
 	    fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
 	    return NULL;
@@ -1124,10 +1321,11 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	else {
 	  if (fast_json_isdigit (c)) {
 	    do {
+	      ndigit++;
 	      c = fast_json_getc_save (json);
 	    } while (fast_json_isdigit (c));
 	  }
-	  else {
+	  else if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
 	    save = fast_json_ungetc_save (json, 0);
 	    fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
 	    return NULL;
@@ -1152,6 +1350,11 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	}
       }
       save = fast_json_ungetc_save (json, c);
+      if (ndigit == 0) {
+	save = fast_json_ungetc_save (json, 0);
+	fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
+	return NULL;
+      }
       if ((json->options & FAST_JSON_PARSE_INT_AS_DOUBLE) == 0 && integer) {
 	fast_json_int_64 int_value;
 
@@ -1217,6 +1420,9 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	fast_json_value_free (json, v);
 	return NULL;
       }
+      if ((json->options & FAST_JSON_ALLOW_JSON5) && c == ']') {
+        break;
+      }
     }
     if (c != ']') {
       fast_json_store_error (json, FAST_JSON_ARRAY_END_ERROR, "");
@@ -1240,45 +1446,113 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
       char name[16];
       char *out = &name[0];
       FAST_JSON_DATA_TYPE n;
+      unsigned int nq = 0;
 
-      if (c != '"') {
-	fast_json_store_error (json, FAST_JSON_STRING_START_ERROR, "");
-	fast_json_value_free (json, v);
-	return NULL;
-      }
-      c = fast_json_getc (json);
-      fast_json_getc_save_start (json, c);
-      while (c > 0 && c != '"') {
-	if (c == '\\') {
-	  fast_json_getc_save (json);
-	}
-	c = fast_json_getc_save (json);
-      }
-      save = fast_json_ungetc_save (json, c);
-      if (json->n_save >= sizeof (name)) {
-	out = (char *) (*json->my_malloc) (json->n_save + 1);
-	if (out == NULL) {
-	  json->error = FAST_JSON_MALLOC_ERROR;
+      if ((json->options & FAST_JSON_ALLOW_JSON5) && c != '"') {
+        fast_json_getc_save_start (json, c);
+        while (c > 0 && c != ':') {
+	  if (fast_json5_isspace (c)) {
+	    break;
+	  }
+	  else if (c == 0xc2) {
+	    c = fast_json_getc_save (json);
+	    if (c == 0xa0) { /* Non-breaking space */
+	      c = ' ';
+	      json->n_save--;
+	      break;
+	    }
+	  }
+	  else if (c == 0xe2) {
+	    c = fast_json_getc_save (json);
+	    if (c == 0x80) {
+	      c = fast_json_getc_save (json);
+	      if (c == 0xa8 || c == 0xa9) {
+		/* Line separator */
+		/* Paragraph separator */
+	        c = ' ';
+	        json->n_save -= 2;
+	        break;
+	      }
+	    }
+	  }
+	  else if (c == 0xef) {
+	    c = fast_json_getc_save (json);
+	    if (c == 0xbb) {
+	      c = fast_json_getc_save (json);
+	      if (c == 0xbf) { /* Byte order mark */
+	        c = ' ';
+	        json->n_save -= 2;
+	        break;
+	      }
+	    }
+	  }
+          nq += (c == '"');
+	  if (c == '\\') {
+	    c = fast_json_getc_save (json);
+	    nq += c == 'x' ? 2 : (c == '0' ? 4 : 0);
+	  }
+	  c = fast_json_getc_save (json);
+        }
+        save = fast_json_ungetc_save (json, c);
+        if (json->n_save + nq >= sizeof (name)) {
+	  out = (char *) (*json->my_malloc) (json->n_save + nq + 1);
+	  if (out == NULL) {
+	    json->error = FAST_JSON_MALLOC_ERROR;
+	    fast_json_value_free (json, v);
+	    return NULL;
+	  }
+        }
+        if (fast_json_check_string (json, save, save + json->n_save, out, '"') !=
+	    FAST_JSON_OK) {
+	  if (out != &name[0]) {
+	    (*json->my_free) (out);
+	  }
 	  fast_json_value_free (json, v);
 	  return NULL;
-	}
+        }
       }
-      if (fast_json_check_string (json, save, save + json->n_save, out) !=
-	  FAST_JSON_OK) {
-	if (out != &name[0]) {
-	  (*json->my_free) (out);
-	}
-	fast_json_value_free (json, v);
-	return NULL;
-      }
-      c = fast_json_getc (json);
-      if (c != '"') {
-	fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
-	if (out != &name[0]) {
-	  (*json->my_free) (out);
-	}
-	fast_json_value_free (json, v);
-	return NULL;
+      else {
+        if (c != '"') {
+	  fast_json_store_error (json, FAST_JSON_STRING_START_ERROR, "");
+	  fast_json_value_free (json, v);
+	  return NULL;
+        }
+        c = fast_json_getc (json);
+        fast_json_getc_save_start (json, c);
+        while (c > 0 && c != '"') {
+          nq += (c == '"');
+	  if (c == '\\') {
+	    c = fast_json_getc_save (json);
+	    nq += c == 'x' ? 2 : (c == '0' ? 4 : 0);
+	  }
+	  c = fast_json_getc_save (json);
+        }
+        save = fast_json_ungetc_save (json, c);
+        if (json->n_save + nq >= sizeof (name)) {
+	  out = (char *) (*json->my_malloc) (json->n_save + nq + 1);
+	  if (out == NULL) {
+	    json->error = FAST_JSON_MALLOC_ERROR;
+	    fast_json_value_free (json, v);
+	    return NULL;
+	  }
+        }
+        if (fast_json_check_string (json, save, save + json->n_save, out, '"') !=
+	    FAST_JSON_OK) {
+	  if (out != &name[0]) {
+	    (*json->my_free) (out);
+	  }
+	  fast_json_value_free (json, v);
+	  return NULL;
+        }
+        c = fast_json_getc (json);
+        if (c != '"') {
+	  fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
+	  if (out != &name[0]) {
+	    (*json->my_free) (out);
+	  }
+	  fast_json_value_free (json, v);
+	  return NULL;
+        }
       }
       if (fast_json_skip_whitespace (json, &c) != FAST_JSON_OK) {
 	if (out != &name[0]) {
@@ -1332,6 +1606,9 @@ fast_json_parse_value (FAST_JSON_TYPE json, int c)
 	fast_json_value_free (json, v);
 	return NULL;
       }
+      if ((json->options & FAST_JSON_ALLOW_JSON5) && c == '}') {
+        break;
+      }
     }
     if (c != '}') {
       fast_json_store_error (json, FAST_JSON_OBJECT_END_ERROR, "");
@@ -1372,6 +1649,11 @@ fast_json_options (FAST_JSON_TYPE json, unsigned int value)
 
   if (json) {
     json->options = value;
+    if (json->options & FAST_JSON_ALLOW_JSON5) {
+      json->options |= FAST_JSON_ALLOW_OCT_HEX |
+		       FAST_JSON_INF_NAN;
+      json->options &= ~FAST_JSON_NO_COMMENT;
+    }
     retval = FAST_JSON_OK;
   }
   return retval;
@@ -1700,8 +1982,37 @@ fast_json_skip_whitespace2 (FAST_JSON_TYPE json, const char **buf)
   const char *cp = *buf;
 
   for (;;) {
-    while (fast_json_isspace (*cp)) {
-      cp++;
+    if ((json->options & FAST_JSON_ALLOW_JSON5)) {
+      for (;;) {
+	const unsigned char *uc = (const unsigned char *) cp;
+
+        if (fast_json5_space[*uc & 0xff] == 0) {
+	  break;
+        }
+        if (fast_json5_isspace (*uc)) {
+          cp++;
+        }
+        else if (*uc == 0xc2 && uc[1] == 0xa0) {
+          /* Non-breaking space */
+          cp += 2;
+        }
+        else if ((*uc == 0xe2 && uc[1] == 0x80 &&
+                  (uc[2] == 0xa8 || uc[2] == 0xa9)) ||
+		 (*uc == 0xef && uc[1] == 0xbb && uc[2] == 0xbf)) {
+          /* Line separator */
+          /* Paragraph separator */
+          /* Byte order mark */
+          cp += 3;
+        }
+        else {
+          break;
+        }
+      }
+    }
+    else {
+      while (fast_json_isspace (*cp)) {
+        cp++;
+      }
     }
     if (UNLIKELY (*cp == '/') &&
         LIKELY ((json->options & FAST_JSON_NO_COMMENT) == 0)) {
@@ -1814,35 +2125,40 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       return NULL;
     }
     break;
+  case '\'':
   case '"':
     {
       char str[8];
       char *out = &str[0];
       const char *save;
+      int sep = *value;
+      int nq = 0;
 
       value++;
       save = value;
-      while (*value && *value != '"') {
+      while (*value && *value != sep) {
+        nq += (*value == '"');
 	if (*value++ == '\\') {
+	  nq += *value == 'x' ? 2 : (*value == '0' ? 4 : 0);
 	  value++;
 	}
       }
-      if ((value - save) >= sizeof (str)) {
-	out = (char *) (*json->my_malloc) ((value - save) + 1);
+      if ((value - save) + nq >= sizeof (str)) {
+	out = (char *) (*json->my_malloc) ((value - save) + nq + 1);
 	if (out == NULL) {
 	  fast_json_store_error2 (json, FAST_JSON_MALLOC_ERROR, value,
 				  ":,]}");
 	  return NULL;
 	}
       }
-      if (fast_json_check_string (json, save, value, out) != FAST_JSON_OK) {
+      if (fast_json_check_string (json, save, value, out, sep) != FAST_JSON_OK) {
 	fast_json_store_error2 (json, json->error, save, ":,]}");
 	if (out != &str[0]) {
 	  (*json->my_free) (out);
 	}
 	return NULL;
       }
-      if (*value != '"') {
+      if (*value != sep) {
 	fast_json_store_error2 (json, FAST_JSON_STRING_END_ERROR, value,
 				":,]}");
 	if (out != &str[0]) {
@@ -1866,6 +2182,12 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       value++;
     }
     break;
+  case '.':
+      if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
+        fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, value, ":,]}");
+        return NULL;
+      }
+      /* FALLTHRU */
   case '+':			/* FALLTHRU */
   case '-':			/* FALLTHRU */
   case '0':			/* FALLTHRU */
@@ -1882,6 +2204,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       unsigned int integer = 1;
       unsigned int hex = 0;
       unsigned int sign = 0;
+      unsigned int ndigit = 0;
       const char *save;
       char *end;
       const char *dp = NULL;
@@ -1897,17 +2220,20 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	value++;
       }
       if (*value == '0') {
+	ndigit++;
 	value++;
 	if ((json->options & FAST_JSON_ALLOW_OCT_HEX) != 0) {
 	  if (*value == 'x' || *value == 'X') {
 	    hex = 1;
 	    value++;
 	    while (fast_json_isxdigit (*value)) {
+	      ndigit++;
 	      value++;
 	    }
 	  }
 	  else {
 	    while (*value >= '0' && *value <= '7') {
+	      ndigit++;
 	      value++;
 	    }
 	  }
@@ -1915,8 +2241,11 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       }
       else if (LIKELY (fast_json_isdigit (*value))) {
 	do {
+	  ndigit++;
 	  value++;
 	} while (fast_json_isdigit (*value));
+      }
+      else if ((json->options & FAST_JSON_ALLOW_JSON5) && *value == '.') {
       }
       else {
 	if ((json->options & FAST_JSON_INF_NAN) != 0) {
@@ -1959,10 +2288,11 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	if (UNLIKELY (hex)) {
 	  if (fast_json_isxdigit (*value)) {
 	    do {
+	      ndigit++;
 	      value++;
 	    } while (fast_json_isxdigit (*value));
 	  }
-	  else {
+	  else if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
 	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save,
 				    ":,]}");
 	    return NULL;
@@ -1971,10 +2301,11 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	else {
 	  if (fast_json_isdigit (*value)) {
 	    do {
+	      ndigit++;
 	      value++;
 	    } while (fast_json_isdigit (*value));
 	  }
-	  else {
+	  else if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
 	    fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save,
 				    ":,]}");
 	    return NULL;
@@ -1997,6 +2328,10 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	  fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save, ":,]}");
 	  return NULL;
 	}
+      }
+      if (ndigit == 0) {
+	fast_json_store_error2 (json, FAST_JSON_NUMBER_ERROR, save, ":,]}");
+	return NULL;
       }
       if ((json->options & FAST_JSON_PARSE_INT_AS_DOUBLE) == 0 && integer) {
 	fast_json_int_64 int_value;
@@ -2106,6 +2441,9 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	fast_json_value_free (json, v);
 	return NULL;
       }
+      if ((json->options & FAST_JSON_ALLOW_JSON5) && *value == ']') {
+        break;
+      }
     }
     if (*value != ']') {
       fast_json_store_error2 (json, FAST_JSON_ARRAY_END_ERROR, value, ":,]}");
@@ -2131,24 +2469,64 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
       }
       for (;;) {
 	const char *save;
+	const char *end;
 	char name[16];
 	char *out = &name[0];
 	FAST_JSON_DATA_TYPE n;
+        unsigned int nq = 0;
 
-	if (*value++ != '"') {
-	  fast_json_store_error2 (json, FAST_JSON_STRING_START_ERROR, value,
-				  ":,]}");
-	  fast_json_value_free (json, v);
-	  return NULL;
-	}
-	save = value;
-	while (*value && *value != '"') {
-	  if (*value++ == '\\') {
-	    value++;
+	if ((json->options & FAST_JSON_ALLOW_JSON5) && *value != '"') {
+	  save = value;
+	  while (*value && *value != ':') {
+	    const unsigned char *uc = (const unsigned char *) value;
+
+            if (fast_json5_isspace (*uc) ||
+		(*uc == 0xc2 && uc[1] == 0xa0) ||
+		(*uc == 0xe2 && uc[1] == 0x80 &&
+		 (uc[2] == 0xa8 || uc[2] == 0xa9)) ||
+		(*uc == 0xef && uc[1] == 0xbb && uc[2] == 0xbf)) {
+		/* Non-breaking space */
+		/* Line separator */
+		/* Paragraph separator */
+		/* Byte order mark */
+              break;
+	    }
+            nq += (*value == '"');
+	    if (*value++ == '\\') {
+	      nq += *value == 'x' ? 2 : (*value == '0' ? 4 : 0);
+	      value++;
+	    }
 	  }
+	  end = value;
 	}
-	if ((value - save) >= sizeof (name)) {
-	  out = (char *) (*json->my_malloc) ((value - save) + 1);
+	else {
+	  if (*value++ != '"') {
+	    fast_json_store_error2 (json, FAST_JSON_STRING_START_ERROR, value,
+				    ":,]}");
+	    fast_json_value_free (json, v);
+	    return NULL;
+	  }
+	  save = value;
+	  while (*value && *value != '"') {
+            nq += (*value == '"');
+	    if (*value++ == '\\') {
+	      nq += *value == 'x' ? 2 : (*value == '0' ? 4 : 0);
+	      value++;
+	    }
+	  }
+	  if (*value != '"') {
+	    fast_json_store_error2 (json, FAST_JSON_STRING_END_ERROR, save,
+				    ":,]}");
+	    if (out != &name[0]) {
+	      (*json->my_free) (out);
+	    }
+	    fast_json_value_free (json, v);
+	    return NULL;
+	  }
+	  end = value++;
+        }
+	if ((end - save) + nq >= sizeof (name)) {
+	  out = (char *) (*json->my_malloc) ((end - save) + nq + 1);
 	  if (out == NULL) {
 	    fast_json_store_error2 (json, FAST_JSON_MALLOC_ERROR, save,
 				    ":,]}");
@@ -2156,7 +2534,7 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	    return NULL;
 	  }
 	}
-	if (fast_json_check_string (json, save, value, out) != FAST_JSON_OK) {
+	if (fast_json_check_string (json, save, end, out, '"') != FAST_JSON_OK) {
 	  fast_json_store_error2 (json, json->error, save, ":,]}");
 	  if (out != &name[0]) {
 	    (*json->my_free) (out);
@@ -2164,16 +2542,6 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	  fast_json_value_free (json, v);
 	  return NULL;
 	}
-	if (*value != '"') {
-	  fast_json_store_error2 (json, FAST_JSON_STRING_END_ERROR, save,
-				  ":,]}");
-	  if (out != &name[0]) {
-	    (*json->my_free) (out);
-	  }
-	  fast_json_value_free (json, v);
-	  return NULL;
-	}
-	value++;
 	if (fast_json_skip_whitespace2 (json, &value) != FAST_JSON_OK) {
 	  if (out != &name[0]) {
 	    (*json->my_free) (out);
@@ -2229,6 +2597,9 @@ fast_json_parse_value2 (FAST_JSON_TYPE json, const char **buf)
 	  fast_json_value_free (json, v);
 	  return NULL;
 	}
+        if ((json->options & FAST_JSON_ALLOW_JSON5) && *value == '}') {
+          break;
+        }
       }
       if (*value != '}') {
 	fast_json_store_error2 (json, FAST_JSON_OBJECT_END_ERROR, value,
@@ -2993,17 +3364,24 @@ fast_json_print_buffer (FAST_JSON_TYPE json,
 	if (*cp == '-' || *cp == '+') {
 	  cp++;
 	}
-	while (fast_json_isdigit (*cp)) {
-	  cp++;
-	}
-	if (*cp == json->decimal_point) {
-	  *cp = '.';
-	}
-	else if (*cp == '\0') {
-	  *cp++ = '.';
-	  *cp = '0';
-	  len += 2;
-	}
+	if (*cp == 'i' && cp[1] == 'n' && cp[2] == 'f' && cp[3] == 0 &&
+	    (json->options & FAST_JSON_ALLOW_JSON5)) {
+          strcpy(&cp[3], "inity");
+	  len += 5;
+        }
+        else {
+	  while (fast_json_isdigit (*cp)) {
+	    cp++;
+	  }
+	  if (*cp == json->decimal_point) {
+	    *cp = '.';
+	  }
+	  else if (*cp == '\0') {
+	    *cp++ = '.';
+	    *cp = '0';
+	    len += 2;
+	  }
+        }
 	return fast_json_puts (json, v, len);
       }
     case FAST_JSON_STRING:
@@ -3272,10 +3650,19 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
   FAST_JSON_DATA_TYPE item = NULL;
 
   if (json && value) {
-    int len = strlen (value);
+    int len = 0;
     char str[8];
     char *new_value = &str[0];
+    const char *cp;
 
+    cp = value;
+    while (*cp) {
+      len += (*cp == '"') + 1;
+      if (*cp++ == '\\') {
+        len += *cp == 'x' ? 2 : (*cp == '0' ? 4 : 0);
+	cp++;
+      }
+    }
     if (len >= sizeof (str)) {
       new_value = fast_json_strdup (json, value);
     }
@@ -3283,7 +3670,7 @@ fast_json_create_string (FAST_JSON_TYPE json, const char *value)
       memcpy (str, value, len + 1);
     }
     if (new_value) {
-      if (fast_json_check_string (json, value, value + len, new_value) ==
+      if (fast_json_check_string (json, value, value + len, new_value, '"') ==
 	  FAST_JSON_OK) {
 	item = fast_json_data_create (json);
 	if (item) {
@@ -3972,10 +4359,19 @@ fast_json_set_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE data,
   FAST_JSON_ERROR_ENUM retval = FAST_JSON_VALUE_ERROR;
 
   if (json && data && data->type == FAST_JSON_STRING && value) {
-    int len = strlen (value);
+    int len = 0;
     char str[8];
     char *new_value;
+    const char *cp;
 
+    cp = value;
+    while (*cp) { 
+      len += (*cp == '"') + 1;
+      if (*cp++ == '\\') {
+        len += *cp == 'x' ? 2 : (*cp == '0' ? 4 : 0);
+	cp++;
+      }
+    }
     if (len >= sizeof (str)) {
       new_value = fast_json_strdup (json, value);
     }
@@ -3983,7 +4379,7 @@ fast_json_set_string (FAST_JSON_TYPE json, FAST_JSON_DATA_TYPE data,
       new_value = memcpy (str, value, len + 1);
     }
     if (new_value) {
-      if (fast_json_check_string (json, value, value + len, new_value) ==
+      if (fast_json_check_string (json, value, value + len, new_value, '"') ==
 	  FAST_JSON_OK) {
 	if (data->is_str == 0) {
 	  (*json->my_free) (data->u.string_value);
@@ -4372,30 +4768,36 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       return FAST_JSON_VALUE_ERROR;
     }
     break;
+  case '\'':
   case '"':
-    c = fast_json_getc (json);
-    fast_json_getc_save_start (json, c);
-    while (c > 0 && c != '"') {
-      if (c == '\\') {
-	fast_json_getc_save (json);
+    {
+      int sep = c;
+
+      c = fast_json_getc (json);
+      fast_json_getc_save_start (json, c);
+      while (c > 0 && c != sep) {
+        if (c == '\\') {
+	  fast_json_getc_save (json);
+        }
+        c = fast_json_getc_save (json);
       }
-      c = fast_json_getc_save (json);
-    }
-    save = fast_json_ungetc_save (json, c);
-    fast_json_update_crc32 (crc, save);
-    c = fast_json_getc (json);
-    if (c != '"') {
-      fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
-      return FAST_JSON_STRING_END_ERROR;
+      save = fast_json_ungetc_save (json, c);
+      fast_json_update_crc32 (crc, save);
+      c = fast_json_getc (json);
+      if (c != sep) {
+        fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
+        return FAST_JSON_STRING_END_ERROR;
+      }
     }
     break;
-  case '+':
-    if ((json->options & FAST_JSON_INF_NAN) == 0) {
+  case '.':
+    if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
       save = fast_json_ungetc_save (json, 0);
       fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
       return FAST_JSON_NUMBER_ERROR;
     }
     /* FALLTHRU */
+  case '+':			/* FALLTHRU */
   case '-':			/* FALLTHRU */
   case '0':			/* FALLTHRU */
   case '1':			/* FALLTHRU */
@@ -4410,7 +4812,15 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
     {
       unsigned int hex = 0;
 
-      if (c == '+' || c == '-') {
+      if (c == '+') {
+        if ((json->options & FAST_JSON_INF_NAN) == 0) {
+          save = fast_json_ungetc_save (json, 0);
+          fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
+          return FAST_JSON_NUMBER_ERROR;
+        }
+	c = fast_json_getc_save (json);
+      }
+      else if (c == '-') {
 	c = fast_json_getc_save (json);
       }
       if (c == '0') {
@@ -4434,6 +4844,8 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	do {
 	  c = fast_json_getc_save (json);
 	} while (fast_json_isdigit (c));
+      }
+      else if ((json->options & FAST_JSON_ALLOW_JSON5) && c == '.') {
       }
       else {
 	unsigned int last_n_save = json->n_save > 0 ? json->n_save - 1 : 0;
@@ -4481,7 +4893,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	      c = fast_json_getc_save (json);
 	    } while (fast_json_isxdigit (c));
 	  }
-	  else {
+	  else if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
 	    save = fast_json_ungetc_save (json, 0);
 	    fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
 	    return FAST_JSON_NUMBER_ERROR;
@@ -4493,7 +4905,7 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
 	      c = fast_json_getc_save (json);
 	    } while (fast_json_isdigit (c));
 	  }
-	  else {
+	  else if ((json->options & FAST_JSON_ALLOW_JSON5) == 0) {
 	    save = fast_json_ungetc_save (json, 0);
 	    fast_json_store_error (json, FAST_JSON_NUMBER_ERROR, save);
 	    return FAST_JSON_NUMBER_ERROR;
@@ -4544,6 +4956,9 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       if (error != FAST_JSON_OK) {
 	return error;
       }
+      if ((json->options & FAST_JSON_ALLOW_JSON5) && c == ']') {
+        break;
+      }
     }
     if (c != ']') {
       fast_json_store_error (json, FAST_JSON_ARRAY_END_ERROR, "");
@@ -4559,25 +4974,72 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       break;
     }
     for (;;) {
-      if (c != '"') {
-	fast_json_store_error (json, FAST_JSON_STRING_START_ERROR, "");
-	return FAST_JSON_STRING_START_ERROR;
+      if ((json->options & FAST_JSON_ALLOW_JSON5) && c != '"') {
+        fast_json_getc_save_start (json, c);
+        while (c > 0 && c != ':') {
+          if (c == '\\') {
+            fast_json_getc_save (json);
+          }
+          if (fast_json5_isspace (c)) {
+            break;
+          }
+          else if (c == 0xc2) {
+            c = fast_json_getc_save (json);
+            if (c == 0xa0) { /* Non-breaking space */
+	      c = ' ';
+	      json->n_save--;
+              break;
+            }
+          }
+          else if (c == 0xe2) {
+            c = fast_json_getc_save (json);
+            if (c == 0x80) {
+              c = fast_json_getc_save (json);
+              if (c == 0xa8 || c == 0xa9) {
+		/* Line separator */
+		/* Paragraph separator */
+	        c = ' ';
+	        json->n_save -= 2;
+                break;
+              }
+            }
+          }
+          else if (c == 0xef) {
+            c = fast_json_getc_save (json);
+            if (c == 0xbb) {
+              c = fast_json_getc_save (json);
+              if (c == 0xbf) { /* Byte order mark */
+	        c = ' ';
+	        json->n_save -= 2;
+                break;
+              }
+            }
+          }
+          c = fast_json_getc_save (json);
+        }
+        save = fast_json_ungetc_save (json, c);
       }
-      c = fast_json_getc (json);
-      fast_json_getc_save_start (json, c);
-      while (c > 0 && c != '"') {
-	if (c == '\\') {
-	  fast_json_getc_save (json);
-	}
-	c = fast_json_getc_save (json);
+      else {
+        if (c != '"') {
+	  fast_json_store_error (json, FAST_JSON_STRING_START_ERROR, "");
+	  return FAST_JSON_STRING_START_ERROR;
+        }
+        c = fast_json_getc (json);
+        fast_json_getc_save_start (json, c);
+        while (c > 0 && c != '"') {
+	  if (c == '\\') {
+	    fast_json_getc_save (json);
+	  }
+	  c = fast_json_getc_save (json);
+        }
+        save = fast_json_ungetc_save (json, c);
+        c = fast_json_getc (json);
+        if (c != '"') {
+  	  fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
+	  return FAST_JSON_STRING_END_ERROR;
+        }
       }
-      save = fast_json_ungetc_save (json, c);
       fast_json_update_crc32 (crc, save);
-      c = fast_json_getc (json);
-      if (c != '"') {
-	fast_json_store_error (json, FAST_JSON_STRING_END_ERROR, save);
-	return FAST_JSON_STRING_END_ERROR;
-      }
       error = fast_json_skip_whitespace (json, &c);
       if (error != FAST_JSON_OK) {
 	return error;
@@ -4604,6 +5066,9 @@ fast_json_parse_crc (FAST_JSON_TYPE json, unsigned int *crc, int c)
       error = fast_json_skip_whitespace (json, &c);
       if (error != FAST_JSON_OK) {
 	return error;
+      }
+      if ((json->options & FAST_JSON_ALLOW_JSON5) && c == '}') {
+        break;
       }
     }
     if (c != '}') {
